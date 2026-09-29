@@ -278,51 +278,12 @@ const GANTT_TASKS = [
   {name:"Full weighted-load validation and documentation", start:13, end:14},
 ];
 
-let dbDocRef; // undefined = not checked, false = unavailable, object = ready
-
-async function getDbRef() {
-  if (dbDocRef !== undefined) return dbDocRef;
-  // Only touch the capability-based store when window.storage genuinely doesn't
-  // exist (the real published page). Never attempt this in the chat preview,
-  // where window.storage exists but the capability flow is unsupported/unstable.
-  if (typeof window.storage !== 'undefined' && window.storage) {
-    dbDocRef = false;
-    return false;
-  }
-  try {
-    if (typeof claude === 'undefined' || !claude.use) { dbDocRef = false; return false; }
-    const db = await claude.use('db');
-    const user = await claude.use('user');
-    if (!db || !user) { dbDocRef = false; return false; }
-    const uid = await user.id();
-    if (!uid) { dbDocRef = false; return false; }
-    dbDocRef = db.doc('data/users/' + uid + '/tracker');
-  } catch (e) {
-    dbDocRef = false;
-  }
-  return dbDocRef;
-}
-
 async function load() {
-  if (typeof window.storage !== 'undefined' && window.storage) {
-    try {
-      const res = await window.storage.get('fyp-tracker-state');
-      state = res && res.value ? JSON.parse(res.value) : defaultState();
-    } catch (e) {
-      state = defaultState();
-    }
-  } else {
-    const ref = await getDbRef();
-    if (ref) {
-      try {
-        const snap = await ref.get();
-        state = snap.exists ? snap.data() : defaultState();
-      } catch (e) {
-        state = defaultState();
-      }
-    } else {
-      state = defaultState();
-    }
+  try {
+    const raw = localStorage.getItem('fyp-tracker-state');
+    state = raw ? JSON.parse(raw) : defaultState();
+  } catch (e) {
+    state = defaultState();
   }
   if (!state.ganttStart) {
     state.ganttStart = new Date().toISOString().slice(0,10);
@@ -338,17 +299,10 @@ async function load() {
 }
 
 async function save() {
-  if (typeof window.storage !== 'undefined' && window.storage) {
-    try {
-      await window.storage.set('fyp-tracker-state', JSON.stringify(state));
-    } catch (e) {
-      console.error('storage save failed', e);
-    }
-  } else {
-    const ref = await getDbRef();
-    if (ref) {
-      try { await ref.set(state); } catch (e) { console.error('db save failed', e); }
-    }
+  try {
+    localStorage.setItem('fyp-tracker-state', JSON.stringify(state));
+  } catch (e) {
+    console.error('save failed', e);
   }
 }
 

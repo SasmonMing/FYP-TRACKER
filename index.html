@@ -99,6 +99,18 @@
   }
   .note-block.editing .lit-link { color:#fff; text-decoration-color:rgba(255,255,255,.6); }
 
+  .lit-filter-row { display:flex; gap:8px; flex-wrap:wrap; margin:14px 0 4px; }
+  .lit-filter-chip {
+    padding:6px 12px; border-radius:16px; font-size:12px; font-weight:600;
+    background:var(--bg2); color:var(--text2); border:1.5px solid var(--border); cursor:pointer;
+  }
+  .lit-filter-chip.active { background:var(--chipColor); color:#fff; border-color:var(--chipColor); }
+  .lit-badge {
+    display:inline-block; font-size:10.5px; font-weight:700; padding:3px 9px; border-radius:10px;
+    background:var(--chipColor); color:#fff; margin-bottom:6px; align-self:flex-start;
+  }
+  .note-block.editing .lit-badge { background:rgba(255,255,255,.25); }
+
   .cat-heading {
     font-size:13px; font-weight:700; text-transform:uppercase; letter-spacing:.04em;
     color:var(--tabColor); margin:20px 0 10px;
@@ -259,6 +271,22 @@ const CAT_COLORS = {
   "Integration & Testing": "#16a34a",
   "Finalization": "#dc2626",
 };
+
+const LIT_CATEGORIES = [
+  "Manual Wheelchair Limitations and Physical Demands",
+  "Manual Wheelchair Safety and Slope-Related Challenges",
+  "Powered Wheelchair Affordability and Accessibility",
+  "Existing Retrofit and Power-Assist Systems",
+  "Motor Drive and Control System Design",
+];
+const LIT_CAT_COLORS = {
+  [LIT_CATEGORIES[0]]: "#0d9488",
+  [LIT_CATEGORIES[1]]: "#dc2626",
+  [LIT_CATEGORIES[2]]: "#d97706",
+  [LIT_CATEGORIES[3]]: "#2563eb",
+  [LIT_CATEGORIES[4]]: "#7c3aed",
+};
+let litFilter = 'All';
 
 let state = null;
 let activeTab = "Overview";
@@ -424,6 +452,7 @@ async function load() {
   state.literature = state.literature.map(item =>
     item.name !== undefined ? item : { id: item.id, name: item.text || '', link: item.link || '' }
   );
+  state.literature.forEach(item => { if (typeof item.category !== 'string') item.category = ''; });
   render();
   setupDraggable('floatBadge', 'badgePos');
   setupDraggable('floatDates', 'datesPos');
@@ -768,9 +797,13 @@ let editingLitId = null;
 
 function literatureView() {
   const editingLit = editingLitId ? state.literature.find(n=>n.id===editingLitId) : null;
+  const catOptions = LIT_CATEGORIES.map(c => `<option value="${c}" ${editingLit && editingLit.category===c ? 'selected':''}>${c}</option>`).join('');
+  const visibleItems = litFilter === 'All' ? state.literature
+    : litFilter === '__none__' ? state.literature.filter(n => !n.category)
+    : state.literature.filter(n => n.category === litFilter);
   return `
     <h3 style="margin:4px 0 6px;">Literature</h3>
-    <div class="sub" style="margin-bottom:16px;">Your FYP reference list. Add a name and link, drag to reorder, click Edit to change one.</div>
+    <div class="sub" style="margin-bottom:16px;">Your FYP reference list. Add a name, link, and category, drag to reorder, click Edit to change one.</div>
     <div class="card">
       <div class="row">
         <input type="text" id="litName" placeholder="Reference name (e.g. Smith et al., 2024)" value="${editingLit ? escapeHtml(editingLit.name) : ''}">
@@ -778,20 +811,36 @@ function literatureView() {
       <div class="row">
         <input type="text" id="litLink" placeholder="Website link (https://...)" value="${editingLit ? escapeHtml(editingLit.link || '') : ''}">
       </div>
+      <div class="row">
+        <select id="litCategory">
+          <option value="">No category</option>
+          ${catOptions}
+        </select>
+      </div>
       <div class="row" style="margin-top:4px;">
         <button type="button" id="saveLitBtn" style="flex:0 0 auto;">${editingLit ? 'Update entry' : 'Add to list'}</button>
         ${editingLit ? '<button type="button" id="cancelLitEditBtn" style="flex:0 0 auto;background:transparent;color:var(--text);border-color:var(--border);">Cancel edit</button>' : ''}
       </div>
     </div>
+
+    <div class="lit-filter-row">
+      <button type="button" class="lit-filter-chip ${litFilter==='All'?'active':''}" data-litfilter="All" style="--chipColor:${TAB_COLORS['Literature']}">All (${state.literature.length})</button>
+      ${LIT_CATEGORIES.map(c => `
+        <button type="button" class="lit-filter-chip ${litFilter===c?'active':''}" data-litfilter="${c}" style="--chipColor:${LIT_CAT_COLORS[c]}">${c} (${state.literature.filter(n=>n.category===c).length})</button>
+      `).join('')}
+      <button type="button" class="lit-filter-chip ${litFilter==='__none__'?'active':''}" data-litfilter="__none__" style="--chipColor:#6b6b6b">No category (${state.literature.filter(n=>!n.category).length})</button>
+    </div>
+
     <div class="block-grid" style="margin-top:16px;">
-      ${state.literature.length ? state.literature.map(n => `
+      ${visibleItems.length ? visibleItems.map(n => `
         <div class="block note-block ${editingLitId===n.id?'editing':''}" data-litid="${n.id}" draggable="true">
           <button type="button" class="delbtn" data-litdel="${n.id}" title="delete">&times;</button>
+          ${n.category ? `<div class="lit-badge" style="--chipColor:${LIT_CAT_COLORS[n.category] || '#6b6b6b'}">${escapeHtml(n.category)}</div>` : ''}
           <div class="txt" style="font-weight:600;">${escapeHtml(n.name)}</div>
           ${n.link ? `<a href="${escapeHtml(n.link)}" target="_blank" rel="noopener noreferrer" class="lit-link" onclick="event.stopPropagation()">${escapeHtml(n.link)}</a>` : ''}
           <button type="button" class="note-edit-btn" data-litedit="${n.id}">Edit</button>
         </div>
-      `).join('') : '<div class="empty">No references yet — add one above.</div>'}
+      `).join('') : '<div class="empty">No references in this category yet.</div>'}
     </div>
   `;
 }
@@ -1159,16 +1208,18 @@ function bindEvents() {
     try {
       const nameEl = document.getElementById('litName');
       const linkEl = document.getElementById('litLink');
+      const catEl = document.getElementById('litCategory');
       if (!nameEl) return;
       const name = nameEl.value.trim();
       const link = linkEl ? linkEl.value.trim() : '';
+      const category = catEl ? catEl.value : '';
       if (!name) return;
       if (editingLitId) {
         const n = state.literature.find(x=>x.id===editingLitId);
-        if (n) { n.name = name; n.link = link; }
+        if (n) { n.name = name; n.link = link; n.category = category; }
         editingLitId = null;
       } else {
-        state.literature.unshift({ id: Date.now(), name, link });
+        state.literature.unshift({ id: Date.now(), name, link, category });
       }
       render();
       save().catch(err => console.error('save() rejected:', err));
@@ -1178,6 +1229,9 @@ function bindEvents() {
   };
   const litCancel = document.getElementById('cancelLitEditBtn');
   if (litCancel) litCancel.onclick = () => { editingLitId = null; render(); };
+  document.querySelectorAll('[data-litfilter]').forEach(b => {
+    b.onclick = () => { litFilter = b.dataset.litfilter; render(); };
+  });
   document.querySelectorAll('[data-litedit]').forEach(b => {
     b.onclick = () => { editingLitId = +b.dataset.litedit; render(); };
   });

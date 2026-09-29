@@ -37,6 +37,9 @@
     flex:0 1 auto; transition: all .15s;
   }
   .tab.active { background:var(--tabColor); color:#fff; border-color:var(--tabColor); }
+  .tab { cursor:grab; }
+  .tab.dragging { opacity:.4; }
+  .tab.drag-over { border-color:var(--tabColor); border-style:dashed; }
   main { padding: 24px 24px 70px; max-width: 1100px; margin: 0 auto; }
   h1 { font-size: 28px; margin:0 0 6px; }
   .sub { color:var(--text2); font-size:15px; margin-bottom:22px; }
@@ -110,6 +113,8 @@
     background:var(--chipColor); color:#fff; margin-bottom:6px; align-self:flex-start;
   }
   .note-block.editing .lit-badge { background:rgba(255,255,255,.25); }
+  .test-fields { font-size:12.5px; line-height:1.7; margin-top:8px; }
+  .test-fields b { font-weight:700; }
 
   .cat-heading {
     font-size:13px; font-weight:700; text-transform:uppercase; letter-spacing:.04em;
@@ -246,6 +251,26 @@
   <div id="datesContent"></div>
 </div>
 
+<div id="tableModalOverlay" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.45); z-index:50; align-items:center; justify-content:center;">
+  <div style="background:var(--card); border:1px solid var(--border); border-radius:14px; padding:24px; width:280px; box-shadow:0 10px 34px rgba(0,0,0,.3);">
+    <div style="font-weight:700; margin-bottom:14px; font-size:15px;">Insert Table</div>
+    <div class="row">
+      <div style="flex:1;">
+        <label style="font-size:12px; color:var(--text2); display:block; margin-bottom:4px;">Rows</label>
+        <input type="number" id="tableModalRows" value="3" min="1" max="30">
+      </div>
+      <div style="flex:1;">
+        <label style="font-size:12px; color:var(--text2); display:block; margin-bottom:4px;">Columns</label>
+        <input type="number" id="tableModalCols" value="4" min="1" max="12">
+      </div>
+    </div>
+    <div class="row" style="margin-top:16px; margin-bottom:0;">
+      <button type="button" id="tableModalInsertBtn" style="flex:1;">Insert</button>
+      <button type="button" id="tableModalCancelBtn" style="flex:1;background:transparent;color:var(--text);border-color:var(--border);">Cancel</button>
+    </div>
+  </div>
+</div>
+
 <div class="tabs" id="tabs"></div>
 <main id="main"></main>
 
@@ -257,6 +282,8 @@ const TAB_COLORS = {
   "Shopping List": "#16a34a",
   "Budget": "#ea580c",
   "Gantt": "#0891b2",
+  "Test Log": "#65a30d",
+  "Issues Log": "#475569",
   "Calculations": "#4338ca",
   "Literature": "#0d9488",
   "Notes": "#7c3aed",
@@ -345,6 +372,9 @@ const defaultState = () => ({
   ],
   budget: [],
   notes: [],
+  testLog: [],
+  issuesLog: [],
+  issueLog: [],
   literature: [],
   calcDoc: `<h2>3.4.1 Design Assumptions</h2>
 <p>Combined user + wheelchair mass: <b>100 kg</b><br>
@@ -453,12 +483,26 @@ async function load() {
     item.name !== undefined ? item : { id: item.id, name: item.text || '', link: item.link || '' }
   );
   state.literature.forEach(item => { if (typeof item.category !== 'string') item.category = ''; });
+  if (!Array.isArray(state.testLog)) { state.testLog = []; }
+  state.testLog = state.testLog.map(item => item.testId !== undefined ? item : {
+    id: item.id, date: item.date || '', testId: '', category: item.title || '',
+    inputParams: '', measuredResults: '', targetVsActual: '', content: item.content || ''
+  });
+  if (!Array.isArray(state.issuesLog)) { state.issuesLog = []; }
+  state.issuesLog = state.issuesLog.map(item => item.problem !== undefined ? item : {
+    id: item.id, date: item.date || '', subsystem: '',
+    problem: item.title || '', rootCause: '',
+    fix: (item.content || '').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').trim(),
+    status: item.status || 'Open'
+  });
+  if (!Array.isArray(state.issueLog)) { state.issueLog = []; }
   render();
   setupDraggable('floatBadge', 'badgePos');
   setupDraggable('floatDates', 'datesPos');
   renderDatesPanel();
   applyTheme();
   setupThemeToggle();
+  setupTableModal();
   save();
 }
 
@@ -505,10 +549,43 @@ function pctCategory(cat) {
   return Math.round(all.filter(x=>x.done).length / all.length * 100);
 }
 
+function getTabOrder() {
+  if (!Array.isArray(state.tabOrder)) state.tabOrder = TABS.slice();
+  const valid = state.tabOrder.filter(t => TABS.includes(t));
+  TABS.forEach(t => { if (!valid.includes(t)) valid.push(t); });
+  state.tabOrder = valid;
+  return valid;
+}
+
+let tabDragSource = null;
+
 function renderTabs() {
   const el = document.getElementById('tabs');
-  el.innerHTML = TABS.map(t => `<div class="tab ${t===activeTab?'active':''}" data-tab="${t}" style="--tabColor:${TAB_COLORS[t]}">${t}</div>`).join('');
-  el.querySelectorAll('.tab').forEach(t => t.onclick = () => { activeTab = t.dataset.tab; render(); });
+  const order = getTabOrder();
+  el.innerHTML = order.map(t => `<div class="tab ${t===activeTab?'active':''}" data-tab="${t}" draggable="true" style="--tabColor:${TAB_COLORS[t]}">${t}</div>`).join('');
+  el.querySelectorAll('.tab').forEach(t => {
+    t.onclick = () => { if (tabDragSource === null) { activeTab = t.dataset.tab; render(); } };
+    t.ondragstart = (e) => { tabDragSource = t.dataset.tab; t.classList.add('dragging'); e.dataTransfer.effectAllowed = 'move'; };
+    t.ondragend = () => { t.classList.remove('dragging'); tabDragSource = null; };
+    t.ondragover = (e) => { e.preventDefault(); t.classList.add('drag-over'); };
+    t.ondragleave = () => { t.classList.remove('drag-over'); };
+    t.ondrop = (e) => {
+      e.preventDefault();
+      t.classList.remove('drag-over');
+      if (!tabDragSource) return;
+      const targetTab = t.dataset.tab;
+      if (tabDragSource === targetTab) return;
+      const ord = getTabOrder();
+      const fromIdx = ord.indexOf(tabDragSource);
+      const toIdx = ord.indexOf(targetTab);
+      if (fromIdx < 0 || toIdx < 0) return;
+      const [moved] = ord.splice(fromIdx, 1);
+      ord.splice(toIdx, 0, moved);
+      state.tabOrder = ord;
+      tabDragSource = null;
+      save(); render();
+    };
+  });
 }
 
 function blockGrid(key, filterCat) {
@@ -793,6 +870,139 @@ function notesView() {
   `;
 }
 
+let editingTestId = null;
+
+function testLogView() {
+  const editingEntry = editingTestId ? state.testLog.find(t=>t.id===editingTestId) : null;
+  const todayStr = new Date().toISOString().slice(0,10);
+  const sorted = state.testLog.slice().sort((a,b) => (b.date||'').localeCompare(a.date||''));
+  const lastEntry = state.testLog.length ? state.testLog[0] : null;
+  return `
+    <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; margin:4px 0 6px;">
+      <h3 style="margin:0;">Build / Test Log</h3>
+      <button type="button" id="exportTestLogBtn" style="flex:0 0 auto;">Export as Word</button>
+    </div>
+    <div class="sub" style="margin-bottom:16px;">Records what actually happened on the bench, so you can compare it against the Calculations tab.</div>
+    <div class="card">
+      <div class="row">
+        <input type="date" id="testDate" value="${editingEntry ? editingEntry.date : todayStr}" style="max-width:180px;">
+        <input type="text" id="testId" placeholder="Test ID (e.g. Test #01)" value="${editingEntry ? escapeHtml(editingEntry.testId||'') : ''}" style="max-width:160px;">
+        <input type="text" id="testCategory" list="testCategoryList" placeholder="Test category / phase" value="${editingEntry ? escapeHtml(editingEntry.category||'') : ''}">
+        <datalist id="testCategoryList">
+          <option value="Motor Load Test"><option value="Battery Drain Test">
+          <option value="Drive Performance Test"><option value="Slope / Incline Test">
+          <option value="Firmware Test"><option value="Fit / Assembly Test">
+        </datalist>
+      </div>
+      <div class="row">
+        <input type="text" id="testInputParams" placeholder="Input parameters (e.g. Voltage: 24V, PWM: 80%)" value="${editingEntry ? escapeHtml(editingEntry.inputParams||'') : ''}">
+      </div>
+      <div class="row">
+        <input type="text" id="testMeasured" placeholder="Measured results (e.g. Actual RPM: 318, Current: 1.4A)" value="${editingEntry ? escapeHtml(editingEntry.measuredResults||'') : ''}">
+      </div>
+      <div class="row">
+        <input type="text" id="testTargetVsActual" placeholder="Target vs. actual note (e.g. Target 318 RPM — matched)" value="${editingEntry ? escapeHtml(editingEntry.targetVsActual||'') : ''}">
+      </div>
+      <div class="meta" style="margin:10px 0 4px;">Additional notes / data (optional)</div>
+      <div class="calc-toolbar">
+        <button type="button" data-testcmd="bold"><b>B</b></button>
+        <button type="button" data-testcmd="italic"><i>I</i></button>
+        <button type="button" data-testcmd="formatBlock" data-val="H2">Heading</button>
+        <button type="button" data-testcmd="insertHorizontalRule">Divider</button>
+        <button type="button" id="insertTestTableBtn">+ Insert table</button>
+      </div>
+      <div class="calc-doc" id="testLogDoc" contenteditable="true" style="min-height:100px;">${editingEntry ? editingEntry.content||'' : ''}</div>
+      <div class="row" style="margin-top:10px;">
+        <button type="button" id="saveTestBtn" style="flex:0 0 auto;">${editingEntry ? 'Update entry' : 'Save entry'}</button>
+        ${editingEntry ? '<button type="button" id="cancelTestEditBtn" style="flex:0 0 auto;background:transparent;color:var(--text);border-color:var(--border);">Cancel edit</button>' : ''}
+        ${!editingEntry && lastEntry ? '<button type="button" id="duplicateLastTestBtn" style="flex:0 0 auto;background:transparent;color:var(--tabColor);border-color:var(--tabColor);">Duplicate Last Entry</button>' : ''}
+      </div>
+    </div>
+
+    <div class="block-grid" style="margin-top:16px; grid-template-columns:1fr;">
+      ${sorted.length ? sorted.map(t => `
+        <div class="block note-block" data-testid="${t.id}" style="align-items:stretch; cursor:default;">
+          <button type="button" class="delbtn" data-testdel="${t.id}" title="delete">&times;</button>
+          <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+            <div style="font-size:11px; font-weight:700; opacity:.65;">${t.date || ''}</div>
+            ${t.testId ? `<span class="lit-badge" style="--chipColor:${TAB_COLORS['Test Log']}">${escapeHtml(t.testId)}</span>` : ''}
+            ${t.category ? `<span class="lit-badge" style="--chipColor:#6b6b6b">${escapeHtml(t.category)}</span>` : ''}
+          </div>
+          <div class="test-fields">
+            ${t.inputParams ? `<div><b>Input:</b> ${escapeHtml(t.inputParams)}</div>` : ''}
+            ${t.measuredResults ? `<div><b>Measured:</b> ${escapeHtml(t.measuredResults)}</div>` : ''}
+            ${t.targetVsActual ? `<div><b>Target vs Actual:</b> ${escapeHtml(t.targetVsActual)}</div>` : ''}
+          </div>
+          ${t.content ? `<div style="font-size:13px; line-height:1.6; overflow-x:auto; margin-top:8px;">${t.content}</div>` : ''}
+          <button type="button" class="note-edit-btn" data-testedit="${t.id}" style="margin-top:10px;">Edit</button>
+        </div>
+      `).join('') : '<div class="empty">No entries yet — log your first test above.</div>'}
+    </div>
+  `;
+}
+
+let editingIssueId = null;
+
+function issuesLogView() {
+  const editingEntry = editingIssueId ? state.issuesLog.find(t=>t.id===editingIssueId) : null;
+  const todayStr = new Date().toISOString().slice(0,10);
+  const sorted = state.issuesLog.slice().sort((a,b) => (b.date||'').localeCompare(a.date||''));
+  return `
+    <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; margin:4px 0 6px;">
+      <h3 style="margin:0;">Issues / Troubleshooting Log</h3>
+      <button type="button" id="exportIssuesLogBtn" style="flex:0 0 auto;">Export as Word</button>
+    </div>
+    <div class="sub" style="margin-bottom:16px;">Roadblocks, root causes, and fixes — captured in real-time.</div>
+    <div class="card">
+      <div class="row">
+        <input type="date" id="issueDate" value="${editingEntry ? editingEntry.date : todayStr}" style="max-width:180px;">
+        <input type="text" id="issueSubsystem" list="subsystemList" placeholder="Subsystem (e.g. Power Distribution)" value="${editingEntry ? escapeHtml(editingEntry.subsystem||'') : ''}">
+        <datalist id="subsystemList">
+          <option value="Power Distribution"><option value="Mechanical / Chassis">
+          <option value="Motor / Drivetrain"><option value="Firmware / Software">
+          <option value="Control / Joystick"><option value="Sensors">
+        </datalist>
+        <select id="issueStatus" style="max-width:140px;">
+          <option value="Open" ${editingEntry && editingEntry.status==='Open' ? 'selected':''}>Open</option>
+          <option value="Resolved" ${editingEntry && editingEntry.status==='Resolved' ? 'selected':''}>Resolved</option>
+        </select>
+      </div>
+      <div class="row">
+        <input type="text" id="issueProblem" placeholder="The problem / symptom (e.g. Motor stuttering under load)" value="${editingEntry ? escapeHtml(editingEntry.problem||'') : ''}">
+      </div>
+      <div class="row">
+        <textarea id="issueRootCause" placeholder="Root cause analysis (why it happened)">${editingEntry ? escapeHtml(editingEntry.rootCause||'') : ''}</textarea>
+      </div>
+      <div class="row">
+        <textarea id="issueFix" placeholder="The fix / action taken (how you solved it)">${editingEntry ? escapeHtml(editingEntry.fix||'') : ''}</textarea>
+      </div>
+      <div class="row" style="margin-top:4px;">
+        <button type="button" id="saveIssueBtn" style="flex:0 0 auto;">${editingEntry ? 'Update entry' : 'Save entry'}</button>
+        ${editingEntry ? '<button type="button" id="cancelIssueEditBtn" style="flex:0 0 auto;background:transparent;color:var(--text);border-color:var(--border);">Cancel edit</button>' : ''}
+      </div>
+    </div>
+
+    <div class="block-grid" style="margin-top:16px; grid-template-columns:1fr;">
+      ${sorted.length ? sorted.map(t => `
+        <div class="block note-block" data-issueid="${t.id}" style="align-items:stretch; cursor:default;">
+          <button type="button" class="delbtn" data-issuedel="${t.id}" title="delete">&times;</button>
+          <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+            <div style="font-size:11px; font-weight:700; opacity:.65;">${t.date || ''}</div>
+            ${t.subsystem ? `<span class="lit-badge" style="--chipColor:#6b6b6b">${escapeHtml(t.subsystem)}</span>` : ''}
+            <span class="lit-badge" style="--chipColor:${t.status==='Resolved' ? '#16a34a' : '#dc2626'};">${escapeHtml(t.status || 'Open')}</span>
+          </div>
+          <div class="txt" style="margin:4px 0 8px;">${escapeHtml(t.problem||'')}</div>
+          <div class="test-fields">
+            ${t.rootCause ? `<div><b>Root cause:</b> ${escapeHtml(t.rootCause)}</div>` : ''}
+            ${t.fix ? `<div><b>Fix:</b> ${escapeHtml(t.fix)}</div>` : ''}
+          </div>
+          <button type="button" class="note-edit-btn" data-issueedit="${t.id}" style="margin-top:10px;">Edit</button>
+        </div>
+      `).join('') : '<div class="empty">No issues logged yet.</div>'}
+    </div>
+  `;
+}
+
 let editingLitId = null;
 
 function literatureView() {
@@ -911,6 +1121,130 @@ function setupThemeToggle() {
   };
 }
 
+let tableModalTargetId = null;
+let tableModalSavedRange = null;
+
+function openTableModal(targetElId) {
+  tableModalTargetId = targetElId;
+  const el = document.getElementById(targetElId);
+  if (el) {
+    el.focus();
+    const sel = window.getSelection();
+    if (sel.rangeCount > 0) tableModalSavedRange = sel.getRangeAt(0).cloneRange();
+    else tableModalSavedRange = null;
+  }
+  const overlay = document.getElementById('tableModalOverlay');
+  if (overlay) overlay.style.display = 'flex';
+}
+
+function closeTableModal() {
+  const overlay = document.getElementById('tableModalOverlay');
+  if (overlay) overlay.style.display = 'none';
+  tableModalTargetId = null;
+  tableModalSavedRange = null;
+}
+
+function buildCustomTableHtml(rows, cols) {
+  rows = Math.max(1, Math.min(30, rows));
+  cols = Math.max(1, Math.min(12, cols));
+  let html = '<table><tr>';
+  for (let c = 0; c < cols; c++) html += '<th>Header ' + (c+1) + '</th>';
+  html += '</tr>';
+  for (let r = 0; r < rows - 1; r++) {
+    html += '<tr>';
+    for (let c = 0; c < cols; c++) html += '<td>&nbsp;</td>';
+    html += '</tr>';
+  }
+  html += '</table><p><br></p>';
+  return html;
+}
+
+function confirmInsertTable() {
+  const rowsInput = document.getElementById('tableModalRows');
+  const colsInput = document.getElementById('tableModalCols');
+  const rows = +(rowsInput ? rowsInput.value : 3) || 3;
+  const cols = +(colsInput ? colsInput.value : 4) || 4;
+  const target = document.getElementById(tableModalTargetId);
+  if (target) {
+    target.focus();
+    if (tableModalSavedRange) {
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(tableModalSavedRange);
+    }
+  }
+  try { document.execCommand('insertHTML', false, buildCustomTableHtml(rows, cols)); } catch (e) {}
+  closeTableModal();
+}
+
+function exportTestLogAsWord() {
+  const entries = state.testLog.slice().sort((a,b) => (a.date||'').localeCompare(b.date||''));
+  let body = '<h1>Build / Test Log</h1>';
+  if (!entries.length) {
+    body += '<p>No entries yet.</p>';
+  } else {
+    entries.forEach(e => {
+      const heading = [e.date, e.testId, e.category].filter(Boolean).join(' &mdash; ');
+      body += '<h2>' + heading + '</h2>';
+      if (e.inputParams) body += '<p><b>Input:</b> ' + escapeHtml(e.inputParams) + '</p>';
+      if (e.measuredResults) body += '<p><b>Measured:</b> ' + escapeHtml(e.measuredResults) + '</p>';
+      if (e.targetVsActual) body += '<p><b>Target vs Actual:</b> ' + escapeHtml(e.targetVsActual) + '</p>';
+      body += (e.content || '');
+      body += '<hr>';
+    });
+  }
+  const doc = '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">'
+    + '<head><meta charset="utf-8"><title>Build Test Log</title></head><body>' + body + '</body></html>';
+  const blob = new Blob(['\ufeff', doc], { type: 'application/msword' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'build-test-log.doc';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function exportIssuesLogAsWord() {
+  const entries = state.issuesLog.slice().sort((a,b) => (a.date||'').localeCompare(b.date||''));
+  let body = '<h1>Issues / Troubleshooting Log</h1>';
+  if (!entries.length) {
+    body += '<p>No entries yet.</p>';
+  } else {
+    entries.forEach(e => {
+      const heading = [e.date, e.subsystem, e.problem].filter(Boolean).join(' &mdash; ');
+      body += '<h2>' + heading + '</h2>';
+      body += '<p><b>Status:</b> ' + escapeHtml(e.status || 'Open') + '</p>';
+      if (e.rootCause) body += '<p><b>Root cause:</b> ' + escapeHtml(e.rootCause) + '</p>';
+      if (e.fix) body += '<p><b>Fix:</b> ' + escapeHtml(e.fix) + '</p>';
+      body += '<hr>';
+    });
+  }
+  const doc = '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">'
+    + '<head><meta charset="utf-8"><title>Issues Log</title></head><body>' + body + '</body></html>';
+  const blob = new Blob(['\ufeff', doc], { type: 'application/msword' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'issues-log.doc';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function setupTableModal() {
+  const overlay = document.getElementById('tableModalOverlay');
+  if (!overlay || overlay.dataset.setup) return;
+  overlay.dataset.setup = '1';
+  const insertBtn = document.getElementById('tableModalInsertBtn');
+  const cancelBtn = document.getElementById('tableModalCancelBtn');
+  if (insertBtn) insertBtn.onclick = confirmInsertTable;
+  if (cancelBtn) cancelBtn.onclick = closeTableModal;
+  overlay.onclick = (e) => { if (e.target === overlay) closeTableModal(); };
+}
+
 function setupDraggable(elId, posKey) {
   const el = document.getElementById(elId);
   if (!el || el.dataset.dragSetup) return;
@@ -977,6 +1311,8 @@ function render() {
   else if (activeTab === "Shopping List") m.innerHTML = '<h3 style="margin:4px 0 14px;">Shopping List</h3>' + shoppingListView();
   else if (activeTab === "Budget") m.innerHTML = budgetView();
   else if (activeTab === "Gantt") m.innerHTML = ganttView();
+  else if (activeTab === "Test Log") m.innerHTML = testLogView();
+  else if (activeTab === "Issues Log") m.innerHTML = issuesLogView();
   else if (activeTab === "Calculations") m.innerHTML = calcView();
   else if (activeTab === "Literature") m.innerHTML = literatureView();
   else if (activeTab === "Notes") m.innerHTML = notesView();
@@ -1190,6 +1526,133 @@ function bindEvents() {
   document.querySelectorAll('[data-glossdel]').forEach(b => {
     b.onclick = () => {
       state.calcGlossary = state.calcGlossary.filter(g => g.id !== +b.dataset.glossdel);
+      save(); render();
+    };
+  });
+
+  const testLogDocEl = document.getElementById('testLogDoc');
+  document.querySelectorAll('.calc-toolbar [data-testcmd]').forEach(btn => {
+    btn.addEventListener('mousedown', (e) => e.preventDefault());
+    btn.addEventListener('click', () => {
+      try { document.execCommand(btn.dataset.testcmd, false, btn.dataset.val || null); } catch (e) {}
+    });
+  });
+  const insertTestTableBtn = document.getElementById('insertTestTableBtn');
+  if (insertTestTableBtn) {
+    insertTestTableBtn.addEventListener('mousedown', (e) => e.preventDefault());
+    insertTestTableBtn.addEventListener('click', () => {
+      openTableModal('testLogDoc');
+    });
+  }
+  const exportTestLogBtn = document.getElementById('exportTestLogBtn');
+  if (exportTestLogBtn) exportTestLogBtn.onclick = exportTestLogAsWord;
+  const testSaveBtn = document.getElementById('saveTestBtn');
+  if (testSaveBtn) testSaveBtn.onclick = () => {
+    try {
+      const dateEl = document.getElementById('testDate');
+      const testIdEl = document.getElementById('testId');
+      const categoryEl = document.getElementById('testCategory');
+      const inputEl = document.getElementById('testInputParams');
+      const measuredEl = document.getElementById('testMeasured');
+      const targetEl = document.getElementById('testTargetVsActual');
+      if (!testLogDocEl) return;
+      const date = dateEl ? dateEl.value : '';
+      const testIdVal = testIdEl ? testIdEl.value.trim() : '';
+      const category = categoryEl ? categoryEl.value.trim() : '';
+      const inputParams = inputEl ? inputEl.value.trim() : '';
+      const measuredResults = measuredEl ? measuredEl.value.trim() : '';
+      const targetVsActual = targetEl ? targetEl.value.trim() : '';
+      const content = testLogDocEl.innerHTML;
+      if (!testIdVal && !category && !inputParams && !measuredResults) return;
+      if (editingTestId) {
+        const t = state.testLog.find(x=>x.id===editingTestId);
+        if (t) { t.date = date; t.testId = testIdVal; t.category = category; t.inputParams = inputParams; t.measuredResults = measuredResults; t.targetVsActual = targetVsActual; t.content = content; }
+        editingTestId = null;
+      } else {
+        state.testLog.unshift({ id: Date.now(), date, testId: testIdVal, category, inputParams, measuredResults, targetVsActual, content });
+      }
+      render();
+      save().catch(err => console.error('save() rejected:', err));
+    } catch (err) {
+      console.error('Save test log click handler failed:', err);
+    }
+  };
+  const dupLastTestBtn = document.getElementById('duplicateLastTestBtn');
+  if (dupLastTestBtn) dupLastTestBtn.onclick = () => {
+    const last = state.testLog[0];
+    if (!last) return;
+    const idEl = document.getElementById('testId');
+    const catEl = document.getElementById('testCategory');
+    const inputEl = document.getElementById('testInputParams');
+    const measuredEl = document.getElementById('testMeasured');
+    const targetEl = document.getElementById('testTargetVsActual');
+    const numMatch = (last.testId || '').match(/(\d+)(?!.*\d)/);
+    let nextId = last.testId || '';
+    if (numMatch) {
+      const num = numMatch[1];
+      const nextNum = String(+num + 1).padStart(num.length, '0');
+      nextId = last.testId.slice(0, numMatch.index) + nextNum + last.testId.slice(numMatch.index + num.length);
+    }
+    if (idEl) idEl.value = nextId;
+    if (catEl) catEl.value = last.category || '';
+    if (inputEl) inputEl.value = last.inputParams || '';
+    if (measuredEl) measuredEl.value = last.measuredResults || '';
+    if (targetEl) targetEl.value = last.targetVsActual || '';
+    if (testLogDocEl) testLogDocEl.innerHTML = last.content || '';
+  };
+  const testCancelBtn = document.getElementById('cancelTestEditBtn');
+  if (testCancelBtn) testCancelBtn.onclick = () => { editingTestId = null; render(); };
+  document.querySelectorAll('[data-testedit]').forEach(b => {
+    b.onclick = () => { editingTestId = +b.dataset.testedit; render(); };
+  });
+  document.querySelectorAll('[data-testdel]').forEach(b => {
+    b.onclick = () => {
+      state.testLog = state.testLog.filter(t => t.id !== +b.dataset.testdel);
+      if (editingTestId === +b.dataset.testdel) editingTestId = null;
+      save(); render();
+    };
+  });
+
+  const exportIssuesLogBtn = document.getElementById('exportIssuesLogBtn');
+  if (exportIssuesLogBtn) exportIssuesLogBtn.onclick = exportIssuesLogAsWord;
+  const issueSaveBtn = document.getElementById('saveIssueBtn');
+  if (issueSaveBtn) issueSaveBtn.onclick = () => {
+    try {
+      const dateEl = document.getElementById('issueDate');
+      const subsystemEl = document.getElementById('issueSubsystem');
+      const problemEl = document.getElementById('issueProblem');
+      const rootCauseEl = document.getElementById('issueRootCause');
+      const fixEl = document.getElementById('issueFix');
+      const statusEl = document.getElementById('issueStatus');
+      const date = dateEl ? dateEl.value : '';
+      const subsystem = subsystemEl ? subsystemEl.value.trim() : '';
+      const problem = problemEl ? problemEl.value.trim() : '';
+      const rootCause = rootCauseEl ? rootCauseEl.value.trim() : '';
+      const fix = fixEl ? fixEl.value.trim() : '';
+      const status = statusEl ? statusEl.value : 'Open';
+      if (!problem) return;
+      if (editingIssueId) {
+        const t = state.issuesLog.find(x=>x.id===editingIssueId);
+        if (t) { t.date = date; t.subsystem = subsystem; t.problem = problem; t.rootCause = rootCause; t.fix = fix; t.status = status; }
+        editingIssueId = null;
+      } else {
+        state.issuesLog.unshift({ id: Date.now(), date, subsystem, problem, rootCause, fix, status });
+      }
+      render();
+      save().catch(err => console.error('save() rejected:', err));
+    } catch (err) {
+      console.error('Save issue log click handler failed:', err);
+    }
+  };
+  const issueCancelBtn = document.getElementById('cancelIssueEditBtn');
+  if (issueCancelBtn) issueCancelBtn.onclick = () => { editingIssueId = null; render(); };
+  document.querySelectorAll('[data-issueedit]').forEach(b => {
+    b.onclick = () => { editingIssueId = +b.dataset.issueedit; render(); };
+  });
+  document.querySelectorAll('[data-issuedel]').forEach(b => {
+    b.onclick = () => {
+      state.issuesLog = state.issuesLog.filter(t => t.id !== +b.dataset.issuedel);
+      if (editingIssueId === +b.dataset.issuedel) editingIssueId = null;
       save(); render();
     };
   });

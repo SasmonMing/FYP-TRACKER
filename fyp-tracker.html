@@ -1,0 +1,884 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>FYP Tracker</title>
+<style>
+  :root {
+    --bg: #ffffff; --bg2: #f4f4f4; --text: #0a0a0a; --text2: #6b6b6b;
+    --border: #e2e2e2; --accent: #0a0a0a; --accent2: #eaeaea;
+    --danger: #c0392b; --card: #ffffff;
+  }
+  * { box-sizing: border-box; }
+  html,body{height:100%;}
+  body {
+    margin:0; background:var(--bg); color:var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+    font-size:16px;
+    padding-top: env(safe-area-inset-top,0px);
+    padding-bottom: env(safe-area-inset-bottom,0px);
+  }
+  .tabs {
+    display:flex; gap:8px; padding: 18px 20px 14px; overflow-x:auto;
+    border-bottom:1px solid var(--border); background:var(--bg);
+    position:sticky; top:env(safe-area-inset-top,0px); z-index:9;
+    justify-content:center; max-width:1100px; margin:0 auto;
+  }
+  .tab {
+    padding: 11px 20px; border-radius: 24px; font-size:15px; font-weight:500; white-space:nowrap;
+    cursor:pointer; border:1.5px solid var(--border); background:var(--bg2); color:var(--text2);
+    flex:0 1 auto; transition: all .15s;
+  }
+  .tab.active { background:var(--tabColor); color:#fff; border-color:var(--tabColor); }
+  main { padding: 24px 24px 70px; max-width: 1100px; margin: 0 auto; }
+  h1 { font-size: 28px; margin:0 0 6px; }
+  .sub { color:var(--text2); font-size:15px; margin-bottom:22px; }
+  .card {
+    background:var(--card); border:1px solid var(--border); border-radius:14px;
+    padding:18px 20px; margin-bottom:14px;
+  }
+  .card h3 { margin:0 0 6px; font-size:17px; }
+  .card .meta { color:var(--text2); font-size:13px; margin-bottom:10px; }
+  .progress-bar { height:10px; background:var(--bg2); border-radius:6px; overflow:hidden; margin:8px 0; }
+  .progress-fill { height:100%; background:var(--tabColor); transition:width .3s; }
+  .stat-row { display:flex; gap:12px; flex-wrap:wrap; }
+  .stat { flex:1; min-width:120px; background:var(--bg2); border-radius:12px; padding:12px 14px; }
+  .stat .num { font-size:24px; font-weight:700; }
+  .stat .lbl { font-size:12.5px; color:var(--text2); }
+
+  .cycle-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:12px; margin-bottom:14px; }
+  .cycle-card { border:1px solid var(--border); border-radius:14px; padding:16px; background:var(--bg2); }
+  .cycle-card .pct { font-size:26px; font-weight:700; }
+  .cycle-card .name { font-size:13px; color:var(--text2); margin-top:2px; font-weight:600; }
+
+  .block-grid {
+    display:grid; grid-template-columns:repeat(auto-fill,minmax(200px,1fr)); gap:14px;
+  }
+  .block {
+    position:relative; border:1.5px solid var(--border); border-radius:14px;
+    padding:18px 16px 16px; min-height:106px; background:var(--bg2); cursor:pointer;
+    display:flex; flex-direction:column; justify-content:space-between; gap:10px;
+    transition:border-color .15s, background .15s, color .15s;
+  }
+  .block:hover { border-color:var(--tabColor); }
+  .block.done { background:var(--tabColor); border-color:var(--tabColor); color:#fff; }
+  .block .txt { font-size:14.5px; font-weight:700; line-height:1.35; }
+  .block.done .txt { color:#fff; }
+  .block .check {
+    width:20px; height:20px; border-radius:6px; border:1.5px solid var(--border);
+    background:var(--bg); flex-shrink:0; display:flex; align-items:center; justify-content:center;
+    align-self:flex-end;
+  }
+  .block.done .check { background:#fff; border-color:#fff; color:var(--tabColor); font-size:13px; font-weight:bold; }
+  .block .delbtn {
+    position:absolute; top:8px; right:10px; background:none; border:none; color:var(--text2);
+    font-size:17px; cursor:pointer; line-height:1; padding:2px;
+  }
+  .block.done .delbtn { color:rgba(255,255,255,.75); }
+  .block .delbtn:hover { color:var(--danger); }
+  .block[draggable="true"] { cursor:grab; }
+  .block.dragging { opacity:.4; }
+  .block.drag-over { border-color:var(--tabColor); border-style:dashed; }
+  .note-block { cursor:default; min-height:auto; }
+  .note-block.editing { border-color:var(--tabColor); border-style:dashed; }
+  .note-block .txt { font-weight:400; max-height:160px; overflow-y:auto; }
+  .note-edit-btn {
+    align-self:flex-end; padding:6px 12px; font-size:12.5px; font-weight:600;
+    background:var(--bg); color:var(--tabColor); border:1.5px solid var(--tabColor);
+  }
+
+  .cat-heading {
+    font-size:13px; font-weight:700; text-transform:uppercase; letter-spacing:.04em;
+    color:var(--tabColor); margin:20px 0 10px;
+  }
+  .cat-heading:first-child { margin-top:2px; }
+
+  .shop-grid { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+  @media (max-width:680px) { .shop-grid { grid-template-columns:1fr; } }
+  .shop-item {
+    border:1.5px solid var(--border); border-radius:14px; padding:14px 16px;
+    background:var(--bg2); transition:border-color .15s, background .15s;
+  }
+  .shop-item.sourced { border-color:var(--tabColor); background:var(--tabColor); color:#fff; }
+  .shop-top { display:flex; align-items:flex-start; gap:10px; }
+  .shop-check {
+    width:22px; height:22px; border-radius:6px; border:1.5px solid var(--border); background:var(--bg);
+    display:flex; align-items:center; justify-content:center; flex-shrink:0; font-size:13px; font-weight:bold;
+    margin-top:1px;
+  }
+  .shop-item.sourced .shop-check { background:#fff; color:var(--tabColor); border-color:#fff; }
+  .shop-txt { flex:1; font-size:14.5px; font-weight:700; line-height:1.4; }
+  .shop-item.sourced .shop-txt { color:#fff; }
+  .shop-item input[type=text],.shop-item input[type=number] {
+    background:var(--bg); color:var(--text);
+  }
+  .shop-item.sourced input[type=text],.shop-item.sourced input[type=number] {
+    background:rgba(255,255,255,.92); color:#111; border-color:transparent;
+  }
+  .del { color:var(--danger); cursor:pointer; font-size:18px; flex-shrink:0; background:none; border:none; padding:0 4px; }
+  .shop-item.sourced .del { color:#fff; opacity:.85; }
+
+  table { width:100%; border-collapse:collapse; font-size:14.5px; }
+  th,td { text-align:left; padding:9px 8px; border-bottom:1px solid var(--border); }
+  th { color:var(--text2); font-weight:600; font-size:13px; }
+  td:first-child { font-weight:600; }
+  input[type=text],input[type=number],textarea,select {
+    width:100%; padding:9px 12px; border-radius:9px; border:1px solid var(--border);
+    background:var(--bg2); color:var(--text); font-size:14.5px; font-family:inherit;
+  }
+  textarea { min-height:70px; resize:vertical; }
+  .row { display:flex; gap:8px; margin-bottom:8px; }
+  .row > * { flex:1; }
+  button {
+    padding:10px 16px; border-radius:9px; border:1px solid var(--tabColor); background:var(--tabColor);
+    color:#fff; font-size:14.5px; font-weight:600; cursor:pointer;
+  }
+  .empty { color:var(--text2); font-size:14.5px; padding:16px 0; text-align:center; }
+
+  .floating-badge {
+    position:fixed; top:calc(env(safe-area-inset-top,0px) + 16px); right:18px;
+    background:var(--text); color:var(--bg); z-index:20;
+    padding:12px 18px; border-radius:16px; text-align:right;
+    box-shadow:0 4px 16px rgba(0,0,0,.18); cursor:grab; user-select:none;
+    touch-action:none;
+  }
+  .floating-badge.dragging { cursor:grabbing; opacity:.85; }
+  .floating-badge .pctnum { font-size:24px; font-weight:800; line-height:1; }
+  .floating-badge .pctlabel { font-size:11px; opacity:.75; margin-top:2px; }
+  .floating-badge .datenote { font-size:11.5px; opacity:.85; margin-top:6px; border-top:1px solid rgba(255,255,255,.25); padding-top:6px; }
+
+  .week-tracker {
+    position:sticky; top:calc(env(safe-area-inset-top,0px) + 72px); z-index:8;
+    background:var(--bg); border:1px solid var(--border); border-radius:14px;
+    padding:14px 16px; margin-bottom:16px;
+  }
+  .week-tracker .wt-label { font-size:14px; font-weight:700; margin-bottom:8px; }
+  .week-segs { display:grid; grid-template-columns:repeat(14,1fr); gap:4px; height:16px; }
+  .week-seg { background:var(--bg2); border-radius:4px; overflow:hidden; position:relative; }
+  .week-seg .fill { position:absolute; left:0; top:0; bottom:0; background:var(--tabColor); }
+  .week-nums { display:grid; grid-template-columns:repeat(14,1fr); gap:4px; margin-top:4px; }
+  .week-nums span { font-size:9.5px; color:var(--text2); text-align:center; }
+  .week-dates { display:grid; grid-template-columns:repeat(14,1fr); gap:4px; margin-top:2px; }
+  .week-dates span { font-size:9px; color:var(--text2); text-align:center; opacity:.75; }
+
+  .gantt-edit-rows { display:flex; flex-direction:column; gap:8px; }
+  .gantt-edit-row { display:flex; gap:8px; align-items:center; }
+
+  .gantt-grid { display:grid; grid-template-columns:220px repeat(14,1fr); align-items:center; overflow-x:auto; }
+  .gantt-grid .gh { font-size:11px; color:var(--text2); text-align:center; padding:6px 0; border-bottom:1px solid var(--border); }
+  .gantt-grid .gh.current { color:var(--tabColor); font-weight:700; }
+  .gantt-task-name { font-size:13.5px; font-weight:700; padding:8px 8px 8px 0; border-bottom:1px solid var(--border); }
+  .gantt-cell { height:32px; border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:center; }
+  .gantt-cell.current-col { background:var(--bg2); }
+  .gantt-bar { width:78%; height:16px; border-radius:4px; background:var(--tabColor); }
+</style>
+</head>
+<body>
+
+<div class="floating-badge" id="floatBadge">
+  <div class="pctnum" id="floatPct">0%</div>
+  <div class="pctlabel">overall progress</div>
+  <div class="datenote" id="floatDate"></div>
+</div>
+
+<div class="tabs" id="tabs"></div>
+<main id="main"></main>
+
+<script>
+const TAB_COLORS = {
+  "Overview": "#0a0a0a",
+  "Phase 1": "#2563eb",
+  "Phase 2": "#dc2626",
+  "Shopping List": "#16a34a",
+  "Budget": "#ea580c",
+  "Gantt": "#0891b2",
+  "Notes": "#7c3aed",
+};
+const TABS = Object.keys(TAB_COLORS);
+
+const CATS = ["Planning & Design","Hardware Development","Software Development","Integration & Testing","Finalization"];
+const CAT_COLORS = {
+  "Planning & Design": "#2563eb",
+  "Hardware Development": "#d97706",
+  "Software Development": "#7c3aed",
+  "Integration & Testing": "#16a34a",
+  "Finalization": "#dc2626",
+};
+
+let state = null;
+let activeTab = "Overview";
+
+const defaultState = () => ({
+  phase1: [
+    {t:"Topic selection and title finalisation", done:true, cat:"Planning & Design"},
+    {t:"Chapter 1 - Intro, problem statement, aim/objectives", done:true, cat:"Planning & Design"},
+    {t:"Literature search and source collection (40+ refs)", done:true, cat:"Planning & Design"},
+    {t:"Chapter 2 - Literature review tables and synthesis", done:true, cat:"Planning & Design"},
+    {t:"Component investigation and trade-off comparison (3.2)", done:true, cat:"Planning & Design"},
+    {t:"Engineering assumptions, specs, calculations (3.4)", done:true, cat:"Planning & Design"},
+    {t:"SolidWorks 2D/3D design sketches", done:false, cat:"Planning & Design"},
+    {t:"Professional practices, cost analysis, compilation", done:true, cat:"Planning & Design"},
+  ],
+  phase2: [
+    {t:"Purchase all components from finalised Shopping List", done:false, cat:"Hardware Development"},
+    {t:"Verify received parts against datasheet specs (voltage, RPM, torque)", done:false, cat:"Hardware Development"},
+    {t:"Finalise CAD drawing of drive roller pivot arm in SolidWorks", done:false, cat:"Planning & Design"},
+    {t:"Machine drive roller to 60mm diameter with rubber coating", done:false, cat:"Hardware Development"},
+    {t:"Cut and drill aluminium flat bar for pivot arm and clamp bracket", done:false, cat:"Hardware Development"},
+    {t:"Assemble pivot arm with spring anchor points", done:false, cat:"Hardware Development"},
+    {t:"Mount motor to pivot arm and verify shaft alignment with roller", done:false, cat:"Hardware Development"},
+    {t:"Test-fit clamp bracket on wheelchair frame tube, adjust for diameter", done:false, cat:"Hardware Development"},
+    {t:"Compress engagement spring to calculated distance, verify contact force", done:false, cat:"Hardware Development"},
+    {t:"Set up ESP32-S3 dev environment (Arduino IDE + board package)", done:false, cat:"Software Development"},
+    {t:"Write and test open-loop PWM motor script (no joystick yet)", done:false, cat:"Software Development"},
+    {t:"Implement joystick ADC reading and calibrate centre deadband", done:false, cat:"Software Development"},
+    {t:"Implement differential drive mixing (throttle + turn to L/R speed)", done:false, cat:"Software Development"},
+    {t:"Add PWM ramping/smoothing to prevent jerky acceleration", done:false, cat:"Software Development"},
+    {t:"Wire and test hardware emergency stop, independent of firmware", done:false, cat:"Software Development"},
+    {t:"Assemble full wiring harness (battery, fuse, converter, drivers, ESP32)", done:false, cat:"Integration & Testing"},
+    {t:"Bench test each motor driver individually before full integration", done:false, cat:"Integration & Testing"},
+    {t:"Run flat-ground drive test, measure speed against 1.0 m/s target", done:false, cat:"Integration & Testing"},
+    {t:"Run incline test up to 10°, record current draw and roller slip", done:false, cat:"Integration & Testing"},
+    {t:"Adjust spring tension or roller if slip observed under load", done:false, cat:"Integration & Testing"},
+    {t:"Document test results against Chapter 1 success metrics", done:false, cat:"Finalization"},
+    {t:"Capture final photos/video of the working prototype", done:false, cat:"Finalization"},
+    {t:"Compile Phase 2 report and prepare for submission", done:false, cat:"Finalization"},
+  ],
+  shopping: [
+    {t:"DC Geared Motor — MY1016Z3, 24V, 150W, ~318-324 RPM output, continuous duty", qty:2, link:"", price:""},
+    {t:"Motor Driver — IBT-4 (BTS7960-type), dual H-bridge, 30V / 43A peak", qty:2, link:"", price:""},
+    {t:"Microcontroller — ESP32-S3 DevKitC-1, USB-C, breakout GPIO", qty:1, link:"", price:""},
+    {t:"Joystick Module — 2-axis analog, PS2-style breakout, 5V", qty:1, link:"", price:""},
+    {t:"Emergency Stop Button — 22mm panel mount, normally-closed (NC)", qty:1, link:"", price:""},
+    {t:"Battery — 12V Sealed Lead-Acid (SLA), 7Ah (2x in series for 24V)", qty:2, link:"", price:""},
+    {t:"Inline Fuse Holder + 40A Automotive Blade Fuse", qty:1, link:"", price:""},
+    {t:"Buck Converter — 24V to 5V step-down, min 2A output", qty:1, link:"", price:""},
+    {t:"Drive Roller Stock — 60mm diameter, rubber-coated wheel/caster", qty:2, link:"", price:""},
+    {t:"Heavy Gauge Wire — 14-16 AWG, red + black, for battery/motor lines", qty:1, link:"", price:""},
+    {t:"Signal Gauge Wire — 22-24 AWG, assorted colours, for PWM/joystick lines", qty:1, link:"", price:""},
+    {t:"Ring Terminal Connectors — sized to SLA battery terminals", qty:1, link:"", price:""},
+    {t:"Prototyping Perfboard or Small Project Enclosure Box", qty:1, link:"", price:""},
+    {t:"Cable Ties + Strain Relief Grommets, assorted sizes", qty:1, link:"", price:""},
+  ],
+  budget: [],
+  notes: [],
+  ganttStart: null,
+});
+
+const GANTT_TASKS = [
+  {name:"Component procurement", start:1, end:2},
+  {name:"Finalise CAD - drive roller pivot arm", start:2, end:3},
+  {name:"Fabrication - aluminium mounts, clamp brackets", start:3, end:5},
+  {name:"First fit test on wheelchair frame", start:5, end:5},
+  {name:"Mechanical iteration (spring, clamp fit)", start:6, end:6},
+  {name:"Electronic assembly - wiring, drivers, battery, E-stop", start:7, end:8},
+  {name:"Firmware development (open loop to PWM ramp)", start:8, end:10},
+  {name:"Drive performance test (speed, current, slip)", start:11, end:12},
+  {name:"Full weighted-load validation and documentation", start:13, end:14},
+];
+
+let dbDocRef; // undefined = not checked, false = unavailable, object = ready
+
+async function getDbRef() {
+  if (dbDocRef !== undefined) return dbDocRef;
+  // Only touch the capability-based store when window.storage genuinely doesn't
+  // exist (the real published page). Never attempt this in the chat preview,
+  // where window.storage exists but the capability flow is unsupported/unstable.
+  if (typeof window.storage !== 'undefined' && window.storage) {
+    dbDocRef = false;
+    return false;
+  }
+  try {
+    if (typeof claude === 'undefined' || !claude.use) { dbDocRef = false; return false; }
+    const db = await claude.use('db');
+    const user = await claude.use('user');
+    if (!db || !user) { dbDocRef = false; return false; }
+    const uid = await user.id();
+    if (!uid) { dbDocRef = false; return false; }
+    dbDocRef = db.doc('data/users/' + uid + '/tracker');
+  } catch (e) {
+    dbDocRef = false;
+  }
+  return dbDocRef;
+}
+
+async function load() {
+  if (typeof window.storage !== 'undefined' && window.storage) {
+    try {
+      const res = await window.storage.get('fyp-tracker-state');
+      state = res && res.value ? JSON.parse(res.value) : defaultState();
+    } catch (e) {
+      state = defaultState();
+    }
+  } else {
+    const ref = await getDbRef();
+    if (ref) {
+      try {
+        const snap = await ref.get();
+        state = snap.exists ? snap.data() : defaultState();
+      } catch (e) {
+        state = defaultState();
+      }
+    } else {
+      state = defaultState();
+    }
+  }
+  if (!state.ganttStart) {
+    state.ganttStart = new Date().toISOString().slice(0,10);
+  }
+  if (typeof state.notes === 'string') {
+    state.notes = state.notes.trim() ? [{id: Date.now(), text: state.notes}] : [];
+  }
+  if (!state.badgePos) { state.badgePos = null; }
+  if (!state.ganttTasks) { state.ganttTasks = JSON.parse(JSON.stringify(GANTT_TASKS)); }
+  render();
+  setupBadgeDrag();
+  save();
+}
+
+async function save() {
+  if (typeof window.storage !== 'undefined' && window.storage) {
+    try {
+      await window.storage.set('fyp-tracker-state', JSON.stringify(state));
+    } catch (e) {
+      console.error('storage save failed', e);
+    }
+  } else {
+    const ref = await getDbRef();
+    if (ref) {
+      try { await ref.set(state); } catch (e) { console.error('db save failed', e); }
+    }
+  }
+}
+
+function pct(list) {
+  if (!list.length) return 0;
+  return Math.round(list.filter(x=>x.done).length / list.length * 100);
+}
+
+function pctShopping() {
+  const list = state.shopping;
+  if (!list.length) return 0;
+  return Math.round(list.filter(x=>x.link && x.link.trim()).length / list.length * 100);
+}
+
+function pctCategory(cat) {
+  const all = [...state.phase1, ...state.phase2].filter(x=>x.cat===cat);
+  if (!all.length) return 0;
+  return Math.round(all.filter(x=>x.done).length / all.length * 100);
+}
+
+function renderTabs() {
+  const el = document.getElementById('tabs');
+  el.innerHTML = TABS.map(t => `<div class="tab ${t===activeTab?'active':''}" data-tab="${t}" style="--tabColor:${TAB_COLORS[t]}">${t}</div>`).join('');
+  el.querySelectorAll('.tab').forEach(t => t.onclick = () => { activeTab = t.dataset.tab; render(); });
+}
+
+function blockGrid(key, filterCat) {
+  let items = state[key];
+  let indices = items.map((_,i)=>i);
+  if (filterCat) { indices = indices.filter(i => items[i].cat === filterCat); }
+  if (!indices.length) return '<div class="empty">No tasks in this category yet.</div>';
+  return `
+    <div class="block-grid">
+      ${indices.map(i=>{
+        const it = items[i];
+        return `
+        <div class="block ${it.done?'done':''}" data-list="${key}" data-idx="${i}" draggable="true">
+          <button type="button" class="delbtn" data-list="${key}" data-idx="${i}" data-del="1" title="delete">&times;</button>
+          <div class="txt">${it.t}</div>
+          <div class="check">${it.done?'&#10003;':''}</div>
+        </div>
+      `;}).join('')}
+    </div>
+  `;
+}
+
+function phaseView(key) {
+  const cats = CATS.filter(c => state[key].some(t=>t.cat===c));
+  const catsToShow = cats.length ? cats : ["Planning & Design"];
+  const options = CATS.map(c=>`<option value="${c}">${c}</option>`).join('');
+  return `
+    <div class="card">
+      ${catsToShow.map(c => `
+        <div class="cat-heading">${c}</div>
+        ${blockGrid(key, c)}
+      `).join('')}
+      <div class="row" style="margin-top:18px;">
+        <input type="text" id="add-${key}" placeholder="Add a task...">
+        <select id="cat-${key}" style="max-width:220px;">${options}</select>
+        <button type="button" style="flex:0 0 auto;" data-addto="${key}">Add</button>
+      </div>
+    </div>
+  `;
+}
+
+function shoppingListView() {
+  const items = state.shopping;
+  return `
+    <div class="card">
+      <div class="row">
+        <input type="text" id="add-shop" placeholder="Add a component...">
+        <button type="button" style="flex:0 0 auto;" id="shop-add">Add</button>
+      </div>
+    </div>
+    <div class="shop-grid">
+      ${items.length ? items.map((it,i)=>`
+        <div class="shop-item ${it.link && it.link.trim() ? 'sourced' : ''}">
+          <div class="shop-top">
+            <div class="shop-check">${it.link && it.link.trim() ? '&#10003;' : ''}</div>
+            <div class="shop-txt">${it.t}</div>
+            <button type="button" class="del" data-shopdel="${i}" title="delete">&times;</button>
+          </div>
+          <div class="row" style="margin-top:8px;">
+            <input type="text" placeholder="Paste Shopee/Lazada link..." value="${it.link || ''}" data-shoplink="${i}">
+          </div>
+          <div class="row">
+            <input type="number" placeholder="Qty" value="${it.qty || 1}" data-shopqty="${i}" style="max-width:80px;">
+            <input type="number" placeholder="Price RM" value="${it.price || ''}" data-shopprice="${i}">
+            <button type="button" style="flex:0 0 auto;" data-shoplog="${i}">Log &#8594;</button>
+          </div>
+        </div>
+      `).join('') : '<div class="empty" style="grid-column:1/-1;">No items yet — add one above.</div>'}
+    </div>
+  `;
+}
+
+function overviewView() {
+  const p1 = pct(state.phase1), p2 = pct(state.phase2), pr = pctShopping();
+  const totalCost = state.budget.reduce((s,b)=>s+(b.qty*b.cost),0);
+  return `
+    <h1>FYP Tracker</h1>
+    <div class="sub">Detachable Wheelchair Retrofit Module</div>
+
+    <div class="cycle-grid">
+      ${CATS.map(c => `
+        <div class="cycle-card" style="border-color:${CAT_COLORS[c]}22;">
+          <div class="pct" style="color:${CAT_COLORS[c]}">${pctCategory(c)}%</div>
+          <div class="name">${c}</div>
+          <div class="progress-bar"><div class="progress-fill" style="width:${pctCategory(c)}%; background:${CAT_COLORS[c]}"></div></div>
+        </div>
+      `).join('')}
+    </div>
+
+    <div class="card" style="--tabColor:${TAB_COLORS['Phase 1']}">
+      <h3>Phase 1 — Investigation &amp; Design</h3>
+      <div class="meta">${state.phase1.filter(x=>x.done).length}/${state.phase1.length} tasks complete</div>
+      <div class="progress-bar"><div class="progress-fill" style="width:${p1}%"></div></div>
+    </div>
+    <div class="card" style="--tabColor:${TAB_COLORS['Phase 2']}">
+      <h3>Phase 2 — System Implementation</h3>
+      <div class="meta">${state.phase2.filter(x=>x.done).length}/${state.phase2.length} tasks complete</div>
+      <div class="progress-bar"><div class="progress-fill" style="width:${p2}%"></div></div>
+    </div>
+    <div class="card" style="--tabColor:${TAB_COLORS['Shopping List']}">
+      <h3>Shopping List</h3>
+      <div class="meta">${state.shopping.filter(x=>x.link).length}/${state.shopping.length} items sourced</div>
+      <div class="progress-bar"><div class="progress-fill" style="width:${pr}%"></div></div>
+    </div>
+    <div class="stat-row">
+      <div class="stat"><div class="num">RM ${totalCost}</div><div class="lbl">Estimated budget</div></div>
+      <div class="stat"><div class="num">${state.budget.length}</div><div class="lbl">Line items</div></div>
+    </div>
+  `;
+}
+
+function budgetView() {
+  const total = state.budget.reduce((s,b)=>s+(b.qty*b.cost),0);
+  return `
+    <h3 style="margin:4px 0 6px;">Budget</h3>
+    <div class="sub" style="margin-bottom:16px;">Logged from your Shopping List — a running view of what's been spent.</div>
+    <div class="card">
+      ${state.budget.length ? `
+      <table>
+        <tr><th>Item</th><th>Qty</th><th>Unit (RM)</th><th>Total</th><th></th></tr>
+        ${state.budget.map((b,i)=>`
+          <tr>
+            <td>${b.item}</td>
+            <td>${b.qty}</td>
+            <td>${b.cost}</td>
+            <td>${b.qty*b.cost}</td>
+            <td><button type="button" class="del" data-budgetdel="${i}">&times;</button></td>
+          </tr>
+        `).join('')}
+        <tr><td colspan="3" style="text-align:right;font-weight:700;">Total</td><td style="font-weight:700;">RM ${total}</td><td></td></tr>
+      </table>
+      ` : '<div class="empty">Nothing logged yet — log items from the Shopping List tab.</div>'}
+    </div>
+  `;
+}
+
+function getWeekInfo() {
+  const start = new Date(state.ganttStart + 'T00:00:00');
+  const today = new Date();
+  today.setHours(0,0,0,0);
+  const daysSince = Math.max(0, Math.floor((today - start) / 86400000));
+  const weekIndex = Math.min(13, Math.floor(daysSince / 7));
+  const dayInWeek = daysSince % 7;
+  const fillFrac = Math.min(1, (dayInWeek + 1) / 7);
+  return { weekIndex, dayInWeek, fillFrac, daysSince };
+}
+
+let ganttEditMode = false;
+
+function weekMondayDate(weekIndex) {
+  const start = new Date(state.ganttStart + 'T00:00:00');
+  const d = new Date(start.getTime() + weekIndex*7*86400000);
+  return d.toLocaleDateString('en-GB', { day:'numeric', month:'short' });
+}
+
+function ganttView() {
+  const { weekIndex, dayInWeek, fillFrac } = getWeekInfo();
+  const segs = Array.from({length:14}, (_,i) => {
+    let width = 0;
+    if (i < weekIndex) width = 100;
+    else if (i === weekIndex) width = fillFrac * 100;
+    return `<div class="week-seg"><div class="fill" style="width:${width}%"></div></div>`;
+  }).join('');
+  const nums = Array.from({length:14}, (_,i) => `<span>${i+1}</span>`).join('');
+  const dates = Array.from({length:14}, (_,i) => `<span>${weekMondayDate(i)}</span>`).join('');
+
+  const headers = Array.from({length:14}, (_,i) => `<div class="gh ${i===weekIndex?'current':''}">W${i+1}</div>`).join('');
+
+  let bodyHtml;
+  if (!ganttEditMode) {
+    const rows = state.ganttTasks.map(task => {
+      const cells = Array.from({length:14}, (_,i) => {
+        const wk = i+1;
+        const inRange = wk >= task.start && wk <= task.end;
+        const isCurrent = i === weekIndex;
+        return `<div class="gantt-cell ${isCurrent?'current-col':''}">${inRange ? '<div class="gantt-bar"></div>' : ''}</div>`;
+      }).join('');
+      return `<div class="gantt-task-name">${task.name}</div>${cells}`;
+    }).join('');
+    bodyHtml = `
+      <div class="gantt-grid" style="--tabColor:${TAB_COLORS['Gantt']}">
+        <div class="gh"></div>${headers}
+        ${rows}
+      </div>
+    `;
+  } else {
+    bodyHtml = `
+      <div class="gantt-edit-rows">
+        ${state.ganttTasks.map((task,i) => `
+          <div class="gantt-edit-row">
+            <input type="text" value="${task.name.replace(/"/g,'&quot;')}" data-gname="${i}" style="flex:2;">
+            <input type="number" min="1" max="14" value="${task.start}" data-gstart="${i}" style="max-width:70px;">
+            <input type="number" min="1" max="14" value="${task.end}" data-gend="${i}" style="max-width:70px;">
+            <button type="button" class="del" data-gdel="${i}" style="flex:0 0 auto;">&times;</button>
+          </div>
+        `).join('')}
+      </div>
+      <div class="row" style="margin-top:10px;">
+        <button type="button" id="gantt-add-task" style="flex:0 0 auto;">+ Add task</button>
+      </div>
+    `;
+  }
+
+  return `
+    <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; margin:4px 0 14px;">
+      <h3 style="margin:0;">Phase 2 Gantt Chart — 14 Weeks</h3>
+      <button type="button" id="gantt-edit-toggle" style="flex:0 0 auto; ${ganttEditMode ? '' : 'background:transparent;color:var(--tabColor);'}">${ganttEditMode ? 'Done editing' : 'Edit chart'}</button>
+    </div>
+    <div class="week-tracker" style="--tabColor:${TAB_COLORS['Gantt']}">
+      <div class="wt-label">Week ${weekIndex+1} of 14 &middot; Day ${dayInWeek+1} of this week</div>
+      <div class="week-segs">${segs}</div>
+      <div class="week-nums">${nums}</div>
+      <div class="week-dates">${dates}</div>
+    </div>
+    <div class="card">
+      ${bodyHtml}
+    </div>
+  `;
+}
+
+let editingNoteId = null;
+
+function notesView() {
+  const editingNote = editingNoteId ? state.notes.find(n=>n.id===editingNoteId) : null;
+  return `
+    <h3 style="margin:4px 0 6px;">Notes</h3>
+    <div class="sub" style="margin-bottom:16px;">Write something, save it as a block. Drag blocks to reorder, click Edit to change one.</div>
+    <div class="card">
+      <textarea id="notesArea" placeholder="Type a note...">${editingNote ? escapeHtml(editingNote.text) : ''}</textarea>
+      <div class="row" style="margin-top:10px;">
+        <button type="button" id="saveNoteBtn" style="flex:0 0 auto;">${editingNote ? 'Update block' : 'Save as new block'}</button>
+        ${editingNote ? '<button type="button" id="cancelEditBtn" style="flex:0 0 auto;background:transparent;color:var(--text);border-color:var(--border);">Cancel edit</button>' : ''}
+      </div>
+    </div>
+    <div class="block-grid" style="margin-top:16px;">
+      ${state.notes.length ? state.notes.map(n => `
+        <div class="block note-block ${editingNoteId===n.id?'editing':''}" data-noteid="${n.id}" draggable="true">
+          <button type="button" class="delbtn" data-notedel="${n.id}" title="delete">&times;</button>
+          <div class="txt" style="font-weight:500; white-space:pre-wrap;">${escapeHtml(n.text)}</div>
+          <button type="button" class="note-edit-btn" data-noteedit="${n.id}">Edit</button>
+        </div>
+      `).join('') : '<div class="empty">No notes yet — write one above.</div>'}
+    </div>
+  `;
+}
+
+function escapeHtml(s) {
+  return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function updateFloatingBadge() {
+  const all = [...state.phase1, ...state.phase2];
+  document.getElementById('floatPct').textContent = pct(all) + '%';
+  const today = new Date();
+  const dateStr = today.toLocaleDateString('en-GB', { weekday:'short', day:'numeric', month:'short' });
+  const { weekIndex } = getWeekInfo();
+  document.getElementById('floatDate').textContent = dateStr + ' \u00B7 Wk ' + (weekIndex+1) + '/14';
+}
+
+function setupBadgeDrag() {
+  const badge = document.getElementById('floatBadge');
+  if (badge.dataset.dragSetup) return;
+  badge.dataset.dragSetup = '1';
+
+  if (state.badgePos) {
+    badge.style.top = state.badgePos.top + 'px';
+    badge.style.left = state.badgePos.left + 'px';
+    badge.style.right = 'auto';
+  }
+
+  let offsetX = 0, offsetY = 0, dragging = false;
+
+  const onDown = (clientX, clientY) => {
+    const rect = badge.getBoundingClientRect();
+    offsetX = clientX - rect.left;
+    offsetY = clientY - rect.top;
+    dragging = true;
+    badge.classList.add('dragging');
+    badge.style.right = 'auto';
+  };
+  const onMove = (clientX, clientY) => {
+    if (!dragging) return;
+    let left = clientX - offsetX;
+    let top = clientY - offsetY;
+    const maxLeft = window.innerWidth - badge.offsetWidth - 4;
+    const maxTop = window.innerHeight - badge.offsetHeight - 4;
+    left = Math.max(4, Math.min(left, maxLeft));
+    top = Math.max(4, Math.min(top, maxTop));
+    badge.style.left = left + 'px';
+    badge.style.top = top + 'px';
+  };
+  const onUp = () => {
+    if (!dragging) return;
+    dragging = false;
+    badge.classList.remove('dragging');
+    state.badgePos = { left: parseFloat(badge.style.left), top: parseFloat(badge.style.top) };
+    save();
+  };
+
+  badge.addEventListener('mousedown', (e) => { onDown(e.clientX, e.clientY); e.preventDefault(); });
+  window.addEventListener('mousemove', (e) => onMove(e.clientX, e.clientY));
+  window.addEventListener('mouseup', onUp);
+
+  badge.addEventListener('touchstart', (e) => {
+    const t = e.touches[0]; onDown(t.clientX, t.clientY);
+  }, { passive:true });
+  window.addEventListener('touchmove', (e) => {
+    if (!dragging) return;
+    const t = e.touches[0]; onMove(t.clientX, t.clientY);
+  }, { passive:true });
+  window.addEventListener('touchend', onUp);
+}
+
+function render() {
+  renderTabs();
+  const color = TAB_COLORS[activeTab];
+  const m = document.getElementById('main');
+  m.style.setProperty('--tabColor', color);
+
+  if (activeTab === "Overview") m.innerHTML = overviewView();
+  else if (activeTab === "Phase 1") m.innerHTML = phaseView('phase1');
+  else if (activeTab === "Phase 2") m.innerHTML = phaseView('phase2');
+  else if (activeTab === "Shopping List") m.innerHTML = '<h3 style="margin:4px 0 14px;">Shopping List</h3>' + shoppingListView();
+  else if (activeTab === "Budget") m.innerHTML = budgetView();
+  else if (activeTab === "Gantt") m.innerHTML = ganttView();
+  else if (activeTab === "Notes") m.innerHTML = notesView();
+
+  updateFloatingBadge();
+  bindEvents();
+}
+
+function bindEvents() {
+  let dragSource = null;
+  document.querySelectorAll('.block[draggable="true"][data-list]').forEach(blk => {
+    blk.ondragstart = (e) => {
+      dragSource = { list: blk.dataset.list, idx: +blk.dataset.idx };
+      blk.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+    };
+    blk.ondragend = () => { blk.classList.remove('dragging'); dragSource = null; };
+    blk.ondragover = (e) => { e.preventDefault(); blk.classList.add('drag-over'); };
+    blk.ondragleave = () => { blk.classList.remove('drag-over'); };
+    blk.ondrop = (e) => {
+      e.preventDefault();
+      blk.classList.remove('drag-over');
+      if (!dragSource) return;
+      const targetList = blk.dataset.list, targetIdx = +blk.dataset.idx;
+      if (dragSource.list !== targetList) return;
+      const arr = state[targetList];
+      const [moved] = arr.splice(dragSource.idx, 1);
+      let insertAt = targetIdx;
+      if (dragSource.idx < targetIdx) insertAt = targetIdx; else insertAt = targetIdx;
+      arr.splice(insertAt, 0, moved);
+      save(); render();
+    };
+  });
+
+  document.querySelectorAll('[data-shoplink]').forEach(inp => {
+    inp.oninput = () => {
+      state.shopping[+inp.dataset.shoplink].link = inp.value;
+      save();
+      const item = document.querySelectorAll('.shop-item')[+inp.dataset.shoplink];
+      const chk = item.querySelector('.shop-check');
+      if (inp.value.trim()) { item.classList.add('sourced'); chk.innerHTML = '&#10003;'; }
+      else { item.classList.remove('sourced'); chk.innerHTML = ''; }
+    };
+  });
+  document.querySelectorAll('[data-shopqty]').forEach(inp => {
+    inp.oninput = () => { state.shopping[+inp.dataset.shopqty].qty = +inp.value; save(); };
+  });
+  document.querySelectorAll('[data-shopprice]').forEach(inp => {
+    inp.oninput = () => { state.shopping[+inp.dataset.shopprice].price = +inp.value; save(); };
+  });
+  document.querySelectorAll('[data-shopdel]').forEach(b => {
+    b.onclick = () => { state.shopping.splice(+b.dataset.shopdel,1); save(); render(); };
+  });
+  document.querySelectorAll('[data-shoplog]').forEach(b => {
+    b.onclick = () => {
+      const i = +b.dataset.shoplog;
+      const it = state.shopping[i];
+      const qty = it.qty || 1;
+      const cost = +it.price || 0;
+      const existing = state.budget.findIndex(x => x.item === it.t);
+      if (existing >= 0) { state.budget[existing].qty = qty; state.budget[existing].cost = cost; }
+      else { state.budget.push({ item: it.t, qty, cost }); }
+      save();
+      b.textContent = 'Logged \u2713';
+      setTimeout(()=>{ b.textContent = 'Log \u2192'; }, 1200);
+    };
+  });
+  const shopAdd = document.getElementById('shop-add');
+  if (shopAdd) shopAdd.onclick = () => {
+    const input = document.getElementById('add-shop');
+    const val = input.value.trim();
+    if (!val) return;
+    state.shopping.unshift({t: val, qty:1, link:"", price:""});
+    save(); render();
+  };
+
+  document.querySelectorAll('.block[data-list]').forEach(blk => {
+    blk.onclick = (e) => {
+      if (e.target.closest('[data-del]')) return;
+      const list = blk.dataset.list, idx = +blk.dataset.idx;
+      state[list][idx].done = !state[list][idx].done;
+      save(); render();
+    };
+  });
+  document.querySelectorAll('[data-del]').forEach(b => {
+    b.onclick = (e) => {
+      e.stopPropagation();
+      const list = b.dataset.list, idx = +b.dataset.idx;
+      state[list].splice(idx,1);
+      save(); render();
+    };
+  });
+  document.querySelectorAll('[data-addto]').forEach(btn => {
+    btn.onclick = () => {
+      const key = btn.dataset.addto;
+      const input = document.getElementById('add-'+key);
+      const catSel = document.getElementById('cat-'+key);
+      const val = input.value.trim();
+      if (!val) return;
+      state[key].push({t: val, done:false, cat: catSel ? catSel.value : CATS[0]});
+      save(); render();
+    };
+  });
+  document.querySelectorAll('.del[data-budgetdel]').forEach(b => {
+    b.onclick = () => {
+      state.budget.splice(+b.dataset.budgetdel, 1);
+      save(); render();
+    };
+  });
+  const ganttToggle = document.getElementById('gantt-edit-toggle');
+  if (ganttToggle) ganttToggle.onclick = () => { ganttEditMode = !ganttEditMode; render(); };
+  document.querySelectorAll('[data-gname]').forEach(inp => {
+    inp.oninput = () => { state.ganttTasks[+inp.dataset.gname].name = inp.value; save(); };
+  });
+  document.querySelectorAll('[data-gstart]').forEach(inp => {
+    inp.oninput = () => { state.ganttTasks[+inp.dataset.gstart].start = Math.max(1, Math.min(14, +inp.value||1)); save(); };
+  });
+  document.querySelectorAll('[data-gend]').forEach(inp => {
+    inp.oninput = () => { state.ganttTasks[+inp.dataset.gend].end = Math.max(1, Math.min(14, +inp.value||1)); save(); };
+  });
+  document.querySelectorAll('[data-gdel]').forEach(b => {
+    b.onclick = () => { state.ganttTasks.splice(+b.dataset.gdel,1); save(); render(); };
+  });
+  const ganttAdd = document.getElementById('gantt-add-task');
+  if (ganttAdd) ganttAdd.onclick = () => {
+    state.ganttTasks.push({name:'New task', start:1, end:2});
+    save(); render();
+  };
+
+  const sn = document.getElementById('saveNoteBtn');
+  if (sn) sn.onclick = () => {
+    try {
+      const area = document.getElementById('notesArea');
+      if (!area) { console.error('notesArea not found'); return; }
+      const val = area.value.trim();
+      if (!val) return;
+      if (editingNoteId) {
+        const n = state.notes.find(x=>x.id===editingNoteId);
+        if (n) n.text = val;
+        editingNoteId = null;
+      } else {
+        state.notes.unshift({ id: Date.now(), text: val });
+      }
+      render();
+      save().catch(err => console.error('save() rejected:', err));
+    } catch (err) {
+      console.error('Save note click handler failed:', err);
+    }
+  };
+  const cancelBtn = document.getElementById('cancelEditBtn');
+  if (cancelBtn) cancelBtn.onclick = () => { editingNoteId = null; render(); };
+  document.querySelectorAll('[data-noteedit]').forEach(b => {
+    b.onclick = () => { editingNoteId = +b.dataset.noteedit; render(); };
+  });
+  document.querySelectorAll('[data-notedel]').forEach(b => {
+    b.onclick = () => {
+      state.notes = state.notes.filter(n => n.id !== +b.dataset.notedel);
+      if (editingNoteId === +b.dataset.notedel) editingNoteId = null;
+      save(); render();
+    };
+  });
+  let noteDragSource = null;
+  document.querySelectorAll('.note-block[draggable="true"]').forEach(blk => {
+    blk.ondragstart = (e) => { noteDragSource = blk.dataset.noteid; blk.classList.add('dragging'); e.dataTransfer.effectAllowed='move'; };
+    blk.ondragend = () => { blk.classList.remove('dragging'); noteDragSource = null; };
+    blk.ondragover = (e) => { e.preventDefault(); blk.classList.add('drag-over'); };
+    blk.ondragleave = () => { blk.classList.remove('drag-over'); };
+    blk.ondrop = (e) => {
+      e.preventDefault(); blk.classList.remove('drag-over');
+      if (!noteDragSource) return;
+      const targetId = blk.dataset.noteid;
+      if (noteDragSource === targetId) return;
+      const fromIdx = state.notes.findIndex(n => String(n.id) === String(noteDragSource));
+      const toIdx = state.notes.findIndex(n => String(n.id) === String(targetId));
+      if (fromIdx < 0 || toIdx < 0) return;
+      const [moved] = state.notes.splice(fromIdx, 1);
+      state.notes.splice(toIdx, 0, moved);
+      save(); render();
+    };
+  });
+}
+
+load();
+</script>
+</body>
+</html>

@@ -10,6 +10,12 @@
     --border: #e2e2e2; --accent: #0a0a0a; --accent2: #eaeaea;
     --danger: #c0392b; --card: #ffffff;
   }
+  :root[data-theme="dark"] {
+    --bg: #121212; --bg2: #1e1e1e; --text: #f0f0f0; --text2: #9a9a9a;
+    --border: #333333; --accent: #f0f0f0; --accent2: #2a2a2a;
+    --danger: #e05d4c; --card: #1a1a1a;
+  }
+  body { transition: background .2s, color .2s; }
   * { box-sizing: border-box; }
   html,body{height:100%;}
   body {
@@ -87,6 +93,11 @@
     align-self:flex-end; padding:6px 12px; font-size:12.5px; font-weight:600;
     background:var(--bg); color:var(--tabColor); border:1.5px solid var(--tabColor);
   }
+  .lit-link {
+    display:block; font-size:12px; margin-top:4px; color:var(--tabColor);
+    text-decoration:underline; word-break:break-all;
+  }
+  .note-block.editing .lit-link { color:#fff; text-decoration-color:rgba(255,255,255,.6); }
 
   .cat-heading {
     font-size:13px; font-weight:700; text-transform:uppercase; letter-spacing:.04em;
@@ -136,6 +147,13 @@
   }
   .empty { color:var(--text2); font-size:14.5px; padding:16px 0; text-align:center; }
 
+  .theme-toggle {
+    position:fixed; top:calc(env(safe-area-inset-top,0px) + 16px); left:18px; z-index:20;
+    background:var(--bg2); color:var(--text); border:1.5px solid var(--border);
+    border-radius:16px; padding:10px 14px; font-size:16px; cursor:pointer;
+    box-shadow:0 2px 8px rgba(0,0,0,.08);
+  }
+
   .floating-badge {
     position:fixed; top:calc(env(safe-area-inset-top,0px) + 16px); right:18px;
     background:var(--text); color:var(--bg); z-index:20;
@@ -165,6 +183,34 @@
   .gantt-edit-rows { display:flex; flex-direction:column; gap:8px; }
   .gantt-edit-row { display:flex; gap:8px; align-items:center; }
 
+  .calc-glossary { display:grid; grid-template-columns:repeat(auto-fill,minmax(230px,1fr)); gap:10px; margin-bottom:16px; }
+  .glossary-card {
+    position:relative; border:1px solid var(--border); border-radius:12px; padding:10px 32px 10px 14px; background:var(--bg2);
+  }
+  .glossary-card .glossary-label { font-weight:600; font-size:13.5px; }
+  .glossary-card .glossary-value { margin-top:8px; font-size:20px; font-weight:800; color:var(--tabColor); }
+  .glossary-card .del { position:absolute; top:6px; right:8px; }
+  .glossary-add-row { display:flex; gap:8px; margin-bottom:16px; }
+
+  .calc-toolbar { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:12px; }
+  .calc-toolbar button {
+    padding:7px 12px; font-size:13px; background:var(--bg2); color:var(--text); border:1px solid var(--border);
+  }
+  .calc-toolbar button:hover { border-color:var(--tabColor); color:var(--tabColor); }
+
+  .calc-doc {
+    border:1px solid var(--border); border-radius:14px; padding:28px 32px; background:var(--card);
+    min-height:400px; font-size:15px; line-height:1.75; outline:none;
+  }
+  .calc-doc h2 { font-size:18px; margin:22px 0 10px; border-bottom:2px solid var(--tabColor); padding-bottom:6px; }
+  .calc-doc h2:first-child { margin-top:0; }
+  .calc-doc hr { border:none; border-top:1px solid var(--border); margin:22px 0; }
+  .calc-doc .eq-block {
+    font-family: Cambria, Georgia, 'Times New Roman', serif; background:var(--bg2);
+    border:1px solid var(--border); border-radius:8px; padding:12px 18px; margin:8px 0; font-size:16px;
+  }
+  .calc-doc p { margin:8px 0; }
+
   .gantt-grid { display:grid; grid-template-columns:220px repeat(14,1fr); align-items:center; overflow-x:auto; }
   .gantt-grid .gh { font-size:11px; color:var(--text2); text-align:center; padding:6px 0; border-bottom:1px solid var(--border); }
   .gantt-grid .gh.current { color:var(--tabColor); font-weight:700; }
@@ -176,10 +222,16 @@
 </head>
 <body>
 
+<button type="button" class="theme-toggle" id="themeToggle">&#9788;</button>
+
 <div class="floating-badge" id="floatBadge">
   <div class="pctnum" id="floatPct">0%</div>
   <div class="pctlabel">overall progress</div>
   <div class="datenote" id="floatDate"></div>
+</div>
+
+<div class="floating-badge" id="floatDates" style="left:18px; right:auto; text-align:left; top:calc(env(safe-area-inset-top,0px) + 76px);">
+  <div id="datesContent"></div>
 </div>
 
 <div class="tabs" id="tabs"></div>
@@ -193,6 +245,8 @@ const TAB_COLORS = {
   "Shopping List": "#16a34a",
   "Budget": "#ea580c",
   "Gantt": "#0891b2",
+  "Calculations": "#4338ca",
+  "Literature": "#0d9488",
   "Notes": "#7c3aed",
 };
 const TABS = Object.keys(TAB_COLORS);
@@ -263,6 +317,58 @@ const defaultState = () => ({
   ],
   budget: [],
   notes: [],
+  literature: [],
+  calcDoc: `<h2>3.4.1 Design Assumptions</h2>
+<p>Combined user + wheelchair mass: <b>100 kg</b><br>
+Target maximum slope angle: <b>10&deg;</b><br>
+Coefficient of static friction (rubber roller on tyre): <b>&mu; = 0.7</b><br>
+Rolling resistance coefficient: <b>C<sub>rr</sub> = 0.02</b><br>
+Rear wheel radius: <b>r&#8321; = 0.305 m</b> (24-inch wheel)<br>
+Drive roller diameter: <b>60 mm</b> (r&#8322; = 0.030 m)<br>
+Target flat-ground speed: <b>v = 1.0 m/s</b><br>
+Friction-drive transmission efficiency: <b>&eta; = 75%</b><br>
+Propulsion safety factor: <b>SF<sub>p</sub> = 1.5</b></p>
+
+<hr>
+
+<h2>Step 1 &mdash; Tractive Force on an Incline</h2>
+<div class="eq-block">F<sub>rr</sub> = C<sub>rr</sub> &middot; m &middot; g &middot; cos(&theta;) = 0.02 &times; 100 &times; 9.81 &times; cos(10&deg;) &asymp; <b>19.32 N</b></div>
+<div class="eq-block">F<sub>g</sub> = m &middot; g &middot; sin(&theta;) = 100 &times; 9.81 &times; sin(10&deg;) &asymp; <b>170.35 N</b></div>
+<div class="eq-block">F<sub>total</sub> = F<sub>rr</sub> + F<sub>g</sub> = 19.32 + 170.35 = <b>189.67 N</b></div>
+
+<hr>
+
+<h2>Step 2 &mdash; Mechanical Power Requirement</h2>
+<div class="eq-block">P<sub>raw</sub> = F<sub>total</sub> &times; v = 189.67 &times; 1.0 = <b>189.67 W</b></div>
+<div class="eq-block">P<sub>motor_total</sub> = P<sub>raw</sub> / &eta; = 189.67 / 0.75 &asymp; <b>252.89 W</b></div>
+<p>Two 150W motors give 300W total continuous capacity &rarr; <b>18% power margin</b> above requirement.</p>
+
+<hr>
+
+<h2>Step 3 &mdash; Required Motor Speed (Kinematic Matching)</h2>
+<div class="eq-block">&omega; = v / r&#8322; = 1.0 / 0.030 = <b>33.33 rad/s</b></div>
+<div class="eq-block">RPM = &omega; &times; (60 / 2&pi;) &asymp; <b>318 RPM</b></div>
+<p>Matches the MY1016Z3's standard gearbox output (~300&ndash;324 RPM at 24V) &mdash; confirms viability of the 60mm roller.</p>
+
+<hr>
+
+<h2>Step 4 &mdash; Required Motor Torque</h2>
+<div class="eq-block">F<sub>wheel</sub> = F<sub>total</sub> / 2 = 189.67 / 2 = <b>94.83 N per wheel</b></div>
+<div class="eq-block">&tau;<sub>roller</sub> = (F<sub>wheel</sub> &times; SF<sub>p</sub> &times; r&#8322;) / &eta; = (94.83 &times; 1.5 &times; 0.030) / 0.75 &asymp; <b>5.69 Nm</b></div>
+<p>Required torque (5.69 Nm) is well below the MY1016Z3's rated 45&ndash;55 Nm output &mdash; motor selection here is governed by the RPM-matching requirement (Step 3), not torque; the surplus provides reserve capacity for dynamic loads and wear over time.</p>
+
+<hr>
+
+<h2>Step 5 &mdash; Normal Force (Friction Engagement)</h2>
+<div class="eq-block">F<sub>n</sub> = (F<sub>wheel</sub> &times; SF<sub>p</sub>) / &mu; = (94.83 &times; 1.5) / 0.7 &asymp; <b>203.2 N</b></div>
+<p>The drive roller engagement spring/cam mechanism must exert approximately 203.2 N (&asymp;20.7 kgf) against the tyre to prevent slip under maximum-load hill climb.</p>`,
+  calcGlossary: [
+    { id: 1, label: "Total Tractive Force", value: "189.67 N" },
+    { id: 2, label: "Total Required Motor Power", value: "252.89 W" },
+    { id: 3, label: "Required Motor Speed", value: "318 RPM" },
+    { id: 4, label: "Required Motor Torque (per motor)", value: "5.69 Nm" },
+    { id: 5, label: "Drive Roller Normal Force", value: "203.2 N" },
+  ],
   ganttStart: null,
 });
 
@@ -278,12 +384,28 @@ const GANTT_TASKS = [
   {name:"Full weighted-load validation and documentation", start:13, end:14},
 ];
 
+const JSONBIN_ID = '6abba88cffd5d160533b464e';
+const JSONBIN_KEY = '$2a$10$/XnOdzY/EsJ.CZL30.NpRuoPnAIeCcr73WnbP8MqY9ZIjkOJIVtNO';
+const JSONBIN_URL = 'https://api.jsonbin.io/v3/b/' + JSONBIN_ID;
+
 async function load() {
   try {
-    const raw = localStorage.getItem('fyp-tracker-state');
-    state = raw ? JSON.parse(raw) : defaultState();
+    const res = await fetch(JSONBIN_URL + '/latest', {
+      headers: { 'X-Access-Key': JSONBIN_KEY }
+    });
+    if (!res.ok) throw new Error('JSONBin read failed: ' + res.status);
+    const data = await res.json();
+    const record = data.record;
+    state = (record && !record.placeholder) ? record : defaultState();
+    try { localStorage.setItem('fyp-tracker-state', JSON.stringify(state)); } catch (e) {}
   } catch (e) {
-    state = defaultState();
+    console.error('JSONBin load failed, using local backup:', e);
+    try {
+      const raw = localStorage.getItem('fyp-tracker-state');
+      state = raw ? JSON.parse(raw) : defaultState();
+    } catch (e2) {
+      state = defaultState();
+    }
   }
   if (!state.ganttStart) {
     state.ganttStart = new Date().toISOString().slice(0,10);
@@ -292,17 +414,48 @@ async function load() {
     state.notes = state.notes.trim() ? [{id: Date.now(), text: state.notes}] : [];
   }
   if (!state.badgePos) { state.badgePos = null; }
+  if (!state.datesPos) { state.datesPos = null; }
+  if (typeof state.datesCollapsed !== 'boolean') { state.datesCollapsed = false; }
+  if (!state.theme) { state.theme = 'light'; }
   if (!state.ganttTasks) { state.ganttTasks = JSON.parse(JSON.stringify(GANTT_TASKS)); }
+  if (typeof state.calcDoc !== 'string') { state.calcDoc = defaultState().calcDoc; }
+  if (!Array.isArray(state.calcGlossary)) { state.calcGlossary = defaultState().calcGlossary; }
+  if (!Array.isArray(state.literature)) { state.literature = []; }
+  state.literature = state.literature.map(item =>
+    item.name !== undefined ? item : { id: item.id, name: item.text || '', link: item.link || '' }
+  );
   render();
-  setupBadgeDrag();
+  setupDraggable('floatBadge', 'badgePos');
+  setupDraggable('floatDates', 'datesPos');
+  renderDatesPanel();
+  applyTheme();
+  setupThemeToggle();
   save();
 }
 
+let saveInFlight = null;
+let saveQueued = false;
+
 async function save() {
+  try { localStorage.setItem('fyp-tracker-state', JSON.stringify(state)); } catch (e) {}
+
+  if (saveInFlight) { saveQueued = true; return; }
+  saveInFlight = doSave();
+  await saveInFlight;
+  saveInFlight = null;
+  if (saveQueued) { saveQueued = false; save(); }
+}
+
+async function doSave() {
   try {
-    localStorage.setItem('fyp-tracker-state', JSON.stringify(state));
+    const res = await fetch(JSONBIN_URL, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', 'X-Access-Key': JSONBIN_KEY },
+      body: JSON.stringify(state)
+    });
+    if (!res.ok) throw new Error('JSONBin write failed: ' + res.status);
   } catch (e) {
-    console.error('save failed', e);
+    console.error('JSONBin save failed (saved locally only):', e);
   }
 }
 
@@ -527,6 +680,10 @@ function ganttView() {
       <div class="row" style="margin-top:10px;">
         <button type="button" id="gantt-add-task" style="flex:0 0 auto;">+ Add task</button>
       </div>
+      <div class="row" style="margin-top:14px; align-items:center;">
+        <label style="flex:0 0 auto; font-size:13.5px; font-weight:600;">Phase 2 start date (corrects the week/day tracker above):</label>
+        <input type="date" id="gantt-start-input" value="${state.ganttStart}" style="max-width:180px;">
+      </div>
     `;
   }
 
@@ -548,6 +705,40 @@ function ganttView() {
 }
 
 let editingNoteId = null;
+
+function calcView() {
+  return `
+    <h3 style="margin:4px 0 6px;">Calculations</h3>
+    <div class="sub" style="margin-bottom:16px;">Your engineering calculations, kept in one place. Edit directly below — it saves as you type.</div>
+
+    <div class="calc-glossary" id="calcGlossaryList">
+      ${state.calcGlossary.map(g => `
+        <div class="glossary-card">
+          <button type="button" class="del" data-glossdel="${g.id}" title="remove">&times;</button>
+          <div class="glossary-label">${escapeHtml(g.label)}</div>
+          <div class="glossary-value">${escapeHtml(g.value)}</div>
+        </div>
+      `).join('')}
+    </div>
+    <div class="glossary-add-row">
+      <input type="text" id="gloss-label" placeholder="Value name (e.g. Overall Power)">
+      <input type="text" id="gloss-value" placeholder="Value (e.g. 252.89 W)" style="max-width:180px;">
+      <button type="button" id="gloss-add" style="flex:0 0 auto;">+ Add quick reference</button>
+    </div>
+
+    <div class="calc-toolbar">
+      <button type="button" data-cmd="bold"><b>B</b></button>
+      <button type="button" data-cmd="italic"><i>I</i></button>
+      <button type="button" data-cmd="formatBlock" data-val="H2">Heading</button>
+      <button type="button" data-cmd="formatBlock" data-val="P">Paragraph</button>
+      <button type="button" data-cmd="insertHorizontalRule">Divider</button>
+      <button type="button" id="insertEqBtn">+ Equation block</button>
+      <button type="button" data-cmd="superscript">x&sup2;</button>
+      <button type="button" data-cmd="subscript">x&#8322;</button>
+    </div>
+    <div class="calc-doc" id="calcDoc" contenteditable="true">${state.calcDoc}</div>
+  `;
+}
 
 function notesView() {
   const editingNote = editingNoteId ? state.notes.find(n=>n.id===editingNoteId) : null;
@@ -573,6 +764,38 @@ function notesView() {
   `;
 }
 
+let editingLitId = null;
+
+function literatureView() {
+  const editingLit = editingLitId ? state.literature.find(n=>n.id===editingLitId) : null;
+  return `
+    <h3 style="margin:4px 0 6px;">Literature</h3>
+    <div class="sub" style="margin-bottom:16px;">Your FYP reference list. Add a name and link, drag to reorder, click Edit to change one.</div>
+    <div class="card">
+      <div class="row">
+        <input type="text" id="litName" placeholder="Reference name (e.g. Smith et al., 2024)" value="${editingLit ? escapeHtml(editingLit.name) : ''}">
+      </div>
+      <div class="row">
+        <input type="text" id="litLink" placeholder="Website link (https://...)" value="${editingLit ? escapeHtml(editingLit.link || '') : ''}">
+      </div>
+      <div class="row" style="margin-top:4px;">
+        <button type="button" id="saveLitBtn" style="flex:0 0 auto;">${editingLit ? 'Update entry' : 'Add to list'}</button>
+        ${editingLit ? '<button type="button" id="cancelLitEditBtn" style="flex:0 0 auto;background:transparent;color:var(--text);border-color:var(--border);">Cancel edit</button>' : ''}
+      </div>
+    </div>
+    <div class="block-grid" style="margin-top:16px;">
+      ${state.literature.length ? state.literature.map(n => `
+        <div class="block note-block ${editingLitId===n.id?'editing':''}" data-litid="${n.id}" draggable="true">
+          <button type="button" class="delbtn" data-litdel="${n.id}" title="delete">&times;</button>
+          <div class="txt" style="font-weight:600;">${escapeHtml(n.name)}</div>
+          ${n.link ? `<a href="${escapeHtml(n.link)}" target="_blank" rel="noopener noreferrer" class="lit-link" onclick="event.stopPropagation()">${escapeHtml(n.link)}</a>` : ''}
+          <button type="button" class="note-edit-btn" data-litedit="${n.id}">Edit</button>
+        </div>
+      `).join('') : '<div class="empty">No references yet — add one above.</div>'}
+    </div>
+  `;
+}
+
 function escapeHtml(s) {
   return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
@@ -586,51 +809,104 @@ function updateFloatingBadge() {
   document.getElementById('floatDate').textContent = dateStr + ' \u00B7 Wk ' + (weekIndex+1) + '/14';
 }
 
-function setupBadgeDrag() {
-  const badge = document.getElementById('floatBadge');
-  if (badge.dataset.dragSetup) return;
-  badge.dataset.dragSetup = '1';
+function renderDatesPanel() {
+  const el = document.getElementById('datesContent');
+  if (!el) return;
+  const { weekIndex } = getWeekInfo();
+  const currentWeek = weekIndex + 1;
+  if (state.datesCollapsed) {
+    el.innerHTML = `
+      <div style="display:flex; align-items:center; gap:8px; cursor:pointer;" id="datesToggleBtn">
+        <span style="font-weight:700; font-size:12px;">Key Dates</span>
+        <span style="font-size:11px; opacity:.8;">&middot; Wk ${currentWeek}</span>
+        <span style="font-size:10px; opacity:.6;">&#9660;</span>
+      </div>
+    `;
+  } else {
+    el.innerHTML = `
+      <div style="display:flex; align-items:center; justify-content:space-between; gap:14px; cursor:pointer;" id="datesToggleBtn">
+        <span style="font-weight:700; font-size:12px; opacity:.9;">Key Dates &middot; Currently Wk ${currentWeek}</span>
+        <span style="font-size:10px; opacity:.6;">&#9650;</span>
+      </div>
+      <div style="font-size:11.5px; line-height:1.7; margin-top:8px;">
+        Wk 4 &mdash; In-progress Presentation 1<br>
+        Wk 9 &mdash; In-progress Presentation 2<br>
+        Wk 12 &mdash; Hand in FYP report<br>
+        Wk 13 &mdash; Poster presentation<br>
+        Wk 14 &mdash; Final VIVA presentation
+      </div>
+    `;
+  }
+  const toggleBtn = document.getElementById('datesToggleBtn');
+  if (toggleBtn) toggleBtn.onclick = () => {
+    state.datesCollapsed = !state.datesCollapsed;
+    save();
+    renderDatesPanel();
+  };
+}
 
-  if (state.badgePos) {
-    badge.style.top = state.badgePos.top + 'px';
-    badge.style.left = state.badgePos.left + 'px';
-    badge.style.right = 'auto';
+function applyTheme() {
+  document.documentElement.setAttribute('data-theme', state.theme === 'dark' ? 'dark' : 'light');
+  const btn = document.getElementById('themeToggle');
+  if (btn) btn.innerHTML = state.theme === 'dark' ? '&#9728;' : '&#9788;';
+}
+
+function setupThemeToggle() {
+  const btn = document.getElementById('themeToggle');
+  if (!btn || btn.dataset.setup) return;
+  btn.dataset.setup = '1';
+  btn.onclick = () => {
+    state.theme = state.theme === 'dark' ? 'light' : 'dark';
+    applyTheme();
+    save();
+  };
+}
+
+function setupDraggable(elId, posKey) {
+  const el = document.getElementById(elId);
+  if (!el || el.dataset.dragSetup) return;
+  el.dataset.dragSetup = '1';
+
+  if (state[posKey]) {
+    el.style.top = state[posKey].top + 'px';
+    el.style.left = state[posKey].left + 'px';
+    el.style.right = 'auto';
   }
 
   let offsetX = 0, offsetY = 0, dragging = false;
 
   const onDown = (clientX, clientY) => {
-    const rect = badge.getBoundingClientRect();
+    const rect = el.getBoundingClientRect();
     offsetX = clientX - rect.left;
     offsetY = clientY - rect.top;
     dragging = true;
-    badge.classList.add('dragging');
-    badge.style.right = 'auto';
+    el.classList.add('dragging');
+    el.style.right = 'auto';
   };
   const onMove = (clientX, clientY) => {
     if (!dragging) return;
     let left = clientX - offsetX;
     let top = clientY - offsetY;
-    const maxLeft = window.innerWidth - badge.offsetWidth - 4;
-    const maxTop = window.innerHeight - badge.offsetHeight - 4;
+    const maxLeft = window.innerWidth - el.offsetWidth - 4;
+    const maxTop = window.innerHeight - el.offsetHeight - 4;
     left = Math.max(4, Math.min(left, maxLeft));
     top = Math.max(4, Math.min(top, maxTop));
-    badge.style.left = left + 'px';
-    badge.style.top = top + 'px';
+    el.style.left = left + 'px';
+    el.style.top = top + 'px';
   };
   const onUp = () => {
     if (!dragging) return;
     dragging = false;
-    badge.classList.remove('dragging');
-    state.badgePos = { left: parseFloat(badge.style.left), top: parseFloat(badge.style.top) };
+    el.classList.remove('dragging');
+    state[posKey] = { left: parseFloat(el.style.left), top: parseFloat(el.style.top) };
     save();
   };
 
-  badge.addEventListener('mousedown', (e) => { onDown(e.clientX, e.clientY); e.preventDefault(); });
+  el.addEventListener('mousedown', (e) => { onDown(e.clientX, e.clientY); e.preventDefault(); });
   window.addEventListener('mousemove', (e) => onMove(e.clientX, e.clientY));
   window.addEventListener('mouseup', onUp);
 
-  badge.addEventListener('touchstart', (e) => {
+  el.addEventListener('touchstart', (e) => {
     const t = e.touches[0]; onDown(t.clientX, t.clientY);
   }, { passive:true });
   window.addEventListener('touchmove', (e) => {
@@ -652,6 +928,8 @@ function render() {
   else if (activeTab === "Shopping List") m.innerHTML = '<h3 style="margin:4px 0 14px;">Shopping List</h3>' + shoppingListView();
   else if (activeTab === "Budget") m.innerHTML = budgetView();
   else if (activeTab === "Gantt") m.innerHTML = ganttView();
+  else if (activeTab === "Calculations") m.innerHTML = calcView();
+  else if (activeTab === "Literature") m.innerHTML = literatureView();
   else if (activeTab === "Notes") m.innerHTML = notesView();
 
   updateFloatingBadge();
@@ -778,6 +1056,11 @@ function bindEvents() {
     state.ganttTasks.push({name:'New task', start:1, end:2});
     save(); render();
   };
+  const ganttStartInput = document.getElementById('gantt-start-input');
+  if (ganttStartInput) ganttStartInput.onchange = () => {
+    state.ganttStart = ganttStartInput.value;
+    save(); render();
+  };
 
   const sn = document.getElementById('saveNoteBtn');
   if (sn) sn.onclick = () => {
@@ -830,9 +1113,119 @@ function bindEvents() {
       save(); render();
     };
   });
+
+  const calcDocEl = document.getElementById('calcDoc');
+  if (calcDocEl) {
+    let calcSaveTimer = null;
+    calcDocEl.addEventListener('input', () => {
+      state.calcDoc = calcDocEl.innerHTML;
+      clearTimeout(calcSaveTimer);
+      calcSaveTimer = setTimeout(() => save(), 500);
+    });
+  }
+  document.querySelectorAll('.calc-toolbar [data-cmd]').forEach(btn => {
+    btn.addEventListener('mousedown', (e) => e.preventDefault());
+    btn.addEventListener('click', () => {
+      try { document.execCommand(btn.dataset.cmd, false, btn.dataset.val || null); } catch (e) {}
+      if (calcDocEl) { state.calcDoc = calcDocEl.innerHTML; save(); }
+    });
+  });
+  const insertEqBtn = document.getElementById('insertEqBtn');
+  if (insertEqBtn) {
+    insertEqBtn.addEventListener('mousedown', (e) => e.preventDefault());
+    insertEqBtn.addEventListener('click', () => {
+      try { document.execCommand('insertHTML', false, '<div class="eq-block">New equation...</div><p><br></p>'); } catch (e) {}
+      if (calcDocEl) { state.calcDoc = calcDocEl.innerHTML; save(); }
+    });
+  }
+  document.querySelectorAll('[data-glossdel]').forEach(b => {
+    b.onclick = () => {
+      state.calcGlossary = state.calcGlossary.filter(g => g.id !== +b.dataset.glossdel);
+      save(); render();
+    };
+  });
+  const glossAdd = document.getElementById('gloss-add');
+  if (glossAdd) glossAdd.onclick = () => {
+    const labelEl = document.getElementById('gloss-label');
+    const valueEl = document.getElementById('gloss-value');
+    const label = labelEl.value.trim(), value = valueEl.value.trim();
+    if (!label || !value) return;
+    state.calcGlossary.push({ id: Date.now(), label, value });
+    save(); render();
+  };
+
+  const litSave = document.getElementById('saveLitBtn');
+  if (litSave) litSave.onclick = () => {
+    try {
+      const nameEl = document.getElementById('litName');
+      const linkEl = document.getElementById('litLink');
+      if (!nameEl) return;
+      const name = nameEl.value.trim();
+      const link = linkEl ? linkEl.value.trim() : '';
+      if (!name) return;
+      if (editingLitId) {
+        const n = state.literature.find(x=>x.id===editingLitId);
+        if (n) { n.name = name; n.link = link; }
+        editingLitId = null;
+      } else {
+        state.literature.unshift({ id: Date.now(), name, link });
+      }
+      render();
+      save().catch(err => console.error('save() rejected:', err));
+    } catch (err) {
+      console.error('Save literature click handler failed:', err);
+    }
+  };
+  const litCancel = document.getElementById('cancelLitEditBtn');
+  if (litCancel) litCancel.onclick = () => { editingLitId = null; render(); };
+  document.querySelectorAll('[data-litedit]').forEach(b => {
+    b.onclick = () => { editingLitId = +b.dataset.litedit; render(); };
+  });
+  document.querySelectorAll('[data-litdel]').forEach(b => {
+    b.onclick = () => {
+      state.literature = state.literature.filter(n => n.id !== +b.dataset.litdel);
+      if (editingLitId === +b.dataset.litdel) editingLitId = null;
+      save(); render();
+    };
+  });
+  let litDragSource = null;
+  document.querySelectorAll('[data-litid][draggable="true"]').forEach(blk => {
+    blk.ondragstart = (e) => { litDragSource = blk.dataset.litid; blk.classList.add('dragging'); e.dataTransfer.effectAllowed='move'; };
+    blk.ondragend = () => { blk.classList.remove('dragging'); litDragSource = null; };
+    blk.ondragover = (e) => { e.preventDefault(); blk.classList.add('drag-over'); };
+    blk.ondragleave = () => { blk.classList.remove('drag-over'); };
+    blk.ondrop = (e) => {
+      e.preventDefault(); blk.classList.remove('drag-over');
+      if (!litDragSource) return;
+      const targetId = blk.dataset.litid;
+      if (litDragSource === targetId) return;
+      const fromIdx = state.literature.findIndex(n => String(n.id) === String(litDragSource));
+      const toIdx = state.literature.findIndex(n => String(n.id) === String(targetId));
+      if (fromIdx < 0 || toIdx < 0) return;
+      const [moved] = state.literature.splice(fromIdx, 1);
+      state.literature.splice(toIdx, 0, moved);
+      save(); render();
+    };
+  });
 }
 
 load();
+
+setInterval(() => {
+  updateFloatingBadge();
+  renderDatesPanel();
+  const wt = document.querySelector('.week-tracker');
+  if (wt && !ganttEditMode) {
+    const { weekIndex, dayInWeek, fillFrac } = getWeekInfo();
+    const label = wt.querySelector('.wt-label');
+    if (label) label.textContent = 'Week ' + (weekIndex+1) + ' of 14 \u00B7 Day ' + (dayInWeek+1) + ' of this week';
+    wt.querySelectorAll('.week-seg .fill').forEach((seg,i) => {
+      let width = 0;
+      if (i < weekIndex) width = 100; else if (i === weekIndex) width = fillFrac*100;
+      seg.style.width = width + '%';
+    });
+  }
+}, 60000);
 </script>
 </body>
 </html>

@@ -29,7 +29,7 @@
     display:flex; gap:8px; padding: 18px 20px 14px; overflow-x:auto;
     border-bottom:1px solid var(--border); background:var(--bg);
     position:sticky; top:env(safe-area-inset-top,0px); z-index:9;
-    justify-content:center; max-width:1100px; margin:0 auto;
+    max-width:1100px; margin:0 auto;
   }
   .tab {
     padding: 11px 20px; border-radius: 24px; font-size:15px; font-weight:500; white-space:nowrap;
@@ -502,6 +502,7 @@ async function load() {
   renderDatesPanel();
   applyTheme();
   setupThemeToggle();
+  setupTabWheelScroll();
   setupTableModal();
   save();
 }
@@ -1119,6 +1120,17 @@ function setupThemeToggle() {
     applyTheme();
     save();
   };
+}
+
+function setupTabWheelScroll() {
+  const el = document.getElementById('tabs');
+  if (!el || el.dataset.wheelSetup) return;
+  el.dataset.wheelSetup = '1';
+  el.addEventListener('wheel', (e) => {
+    if (e.deltaY === 0) return;
+    e.preventDefault();
+    el.scrollLeft += e.deltaY;
+  }, { passive: false });
 }
 
 let tableModalTargetId = null;

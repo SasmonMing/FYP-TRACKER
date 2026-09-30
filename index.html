@@ -1274,10 +1274,16 @@ function setupDraggable(elId, posKey) {
   if (!el || el.dataset.dragSetup) return;
   el.dataset.dragSetup = '1';
 
-  if (state[posKey]) {
-    el.style.top = state[posKey].top + 'px';
-    el.style.left = state[posKey].left + 'px';
+  if (state[posKey] && Number.isFinite(state[posKey].top) && Number.isFinite(state[posKey].left)) {
+    const maxLeft = Math.max(4, window.innerWidth - el.offsetWidth - 4);
+    const maxTop = Math.max(4, window.innerHeight - el.offsetHeight - 4);
+    const safeLeft = Math.max(4, Math.min(state[posKey].left, maxLeft));
+    const safeTop = Math.max(4, Math.min(state[posKey].top, maxTop));
+    el.style.top = safeTop + 'px';
+    el.style.left = safeLeft + 'px';
     el.style.right = 'auto';
+  } else if (state[posKey]) {
+    state[posKey] = null;
   }
 
   let offsetX = 0, offsetY = 0, dragging = false;

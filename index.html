@@ -69,6 +69,7 @@
     padding:18px 16px 16px; min-height:106px; background:var(--bg2); cursor:pointer;
     display:flex; flex-direction:column; justify-content:space-between; gap:10px;
     transition:border-color .15s, background .15s, color .15s;
+    min-width:0; overflow-wrap:break-word; word-break:break-word;
   }
   .block:hover { border-color:var(--tabColor); }
   .block.done { background:var(--tabColor); border-color:var(--tabColor); color:#fff; }
@@ -91,7 +92,7 @@
   .block.drag-over { border-color:var(--tabColor); border-style:dashed; }
   .note-block { cursor:default; min-height:auto; }
   .note-block.editing { border-color:var(--tabColor); border-style:dashed; }
-  .note-block .txt { font-weight:400; max-height:160px; overflow-y:auto; }
+  .note-block .txt { font-weight:400; overflow-wrap:break-word; word-break:break-word; }
   .note-edit-btn {
     align-self:flex-end; padding:6px 12px; font-size:12.5px; font-weight:600;
     background:var(--bg); color:var(--tabColor); border:1.5px solid var(--tabColor);
@@ -863,7 +864,7 @@ function notesView() {
       ${state.notes.length ? state.notes.map(n => `
         <div class="block note-block ${editingNoteId===n.id?'editing':''}" data-noteid="${n.id}" draggable="true">
           <button type="button" class="delbtn" data-notedel="${n.id}" title="delete">&times;</button>
-          <div class="txt" style="font-weight:500; white-space:pre-wrap;">${escapeHtml(n.text)}</div>
+          <div class="txt" style="font-weight:500; white-space:pre-wrap;">${linkifyText(n.text)}</div>
           <button type="button" class="note-edit-btn" data-noteedit="${n.id}">Edit</button>
         </div>
       `).join('') : '<div class="empty">No notes yet — write one above.</div>'}
@@ -1058,6 +1059,17 @@ function literatureView() {
 
 function escapeHtml(s) {
   return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function linkifyText(s) {
+  const escaped = escapeHtml(s);
+  return escaped.replace(/((https?:\/\/|www\.)[^\s<]+)/gi, (match) => {
+    let href = match;
+    if (!/^https?:\/\//i.test(href)) href = 'https://' + href;
+    return '<a href="' + href + '" target="_blank" rel="noopener noreferrer" '
+      + 'style="color:var(--tabColor); text-decoration:underline; word-break:break-all;" '
+      + 'onclick="event.stopPropagation()">' + match + '</a>';
+  });
 }
 
 function updateFloatingBadge() {

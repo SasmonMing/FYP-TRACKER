@@ -165,6 +165,25 @@
   }
   .empty { color:var(--text2); font-size:14.5px; padding:16px 0; text-align:center; }
 
+  .sync-banner {
+    display:none; position:fixed; bottom:16px; left:50%; transform:translateX(-50%);
+    align-items:center; gap:12px; max-width:92vw; z-index:40;
+    background:#b45309; color:#fff; padding:10px 16px; border-radius:12px;
+    font-size:13px; box-shadow:0 4px 16px rgba(0,0,0,.25);
+  }
+  .sync-status { position:fixed; left:12px; bottom:12px; z-index:39; display:flex; align-items:center; gap:7px;
+    background:var(--card); color:var(--text2); border:1px solid var(--border); border-radius:999px;
+    padding:5px 11px; font-size:11.5px; cursor:pointer; box-shadow:0 2px 8px rgba(0,0,0,.08); max-width:calc(100vw - 24px); }
+  .sync-status .dot { width:8px; height:8px; border-radius:50%; background:#9ca3af; flex:0 0 auto; }
+  .sync-status[data-level="ok"] .dot { background:#16a34a; }
+  .sync-status[data-level="busy"] .dot { background:#2563eb; }
+  .sync-status[data-level="warn"] .dot { background:#d97706; }
+  .sync-status[data-level="err"] .dot { background:#dc2626; }
+  .sync-status[data-level="err"] { color:#dc2626; border-color:#dc2626; }
+  .sync-status .hist { color:inherit; opacity:.7; text-decoration:underline; }
+  .sync-banner { flex-wrap:wrap; bottom:52px; }
+  .sync-banner button { background:#fff; color:#b45309; border-color:#fff; padding:6px 12px; font-size:12px; flex:0 0 auto; }
+
   .theme-toggle {
     position:fixed; top:calc(env(safe-area-inset-top,0px) + 16px); left:18px; z-index:20;
     background:var(--bg2); color:var(--text); border:1.5px solid var(--border);
@@ -239,6 +258,8 @@
 </style>
 </head>
 <body>
+
+<div class="sync-banner" id="syncBanner"></div>
 
 <button type="button" class="theme-toggle" id="themeToggle">&#9788;</button>
 
@@ -443,29 +464,402 @@ const GANTT_TASKS = [
   {name:"Full weighted-load validation and documentation", start:13, end:14},
 ];
 
-const JSONBIN_ID = '6abba88cffd5d160533b464e';
-const JSONBIN_KEY = '$2a$10$/XnOdzY/EsJ.CZL30.NpRuoPnAIeCcr73WnbP8MqY9ZIjkOJIVtNO';
-const JSONBIN_URL = 'https://api.jsonbin.io/v3/b/' + JSONBIN_ID;
+/* ======================================================================
+   STORAGE & SYNC  (v2 - GitHub-backed)
+   - Every change is written to this device first (localStorage), instantly.
+   - The cloud copy is one JSON file in a PRIVATE GitHub repo. Every save is a
+     commit, so every past version can be restored from the repo history.
+   - GitHub refuses a write if the file changed since this device last read it
+     (sha check). The tracker then re-reads, merges both sides' changes item by
+     item, and writes again - one device can never blindly overwrite another.
+   - A device that has not loaded the cloud yet, or is offline, never uploads.
+   - The GitHub token lives only in this device's browser, never in the page.
+   ====================================================================== */
+const GH_OWNER = 'SasmonMing';
+const GH_REPO  = 'fyp-tracker-data';
+const GH_PATH  = 'tracker-data.json';
+const GH_REPO_API = 'https://api.github.com/repos/' + GH_OWNER + '/' + GH_REPO;
+const GH_CONTENTS = GH_REPO_API + '/contents/' + GH_PATH;
+const GH_HISTORY  = 'https://github.com/' + GH_OWNER + '/' + GH_REPO + '/commits/HEAD/' + GH_PATH;
 
-async function load() {
-  try {
-    const res = await fetch(JSONBIN_URL + '/latest', {
-      headers: { 'X-Access-Key': JSONBIN_KEY }
-    });
-    if (!res.ok) throw new Error('JSONBin read failed: ' + res.status);
-    const data = await res.json();
-    const record = data.record;
-    state = (record && !record.placeholder) ? record : defaultState();
-    try { localStorage.setItem('fyp-tracker-state', JSON.stringify(state)); } catch (e) {}
-  } catch (e) {
-    console.error('JSONBin load failed, using local backup:', e);
-    try {
-      const raw = localStorage.getItem('fyp-tracker-state');
-      state = raw ? JSON.parse(raw) : defaultState();
-    } catch (e2) {
-      state = defaultState();
+// Old JSONBin store - read ONCE, only to seed the GitHub file the very first time. Never written to.
+const JSONBIN_SEED_URL = 'https://api.jsonbin.io/v3/b/6abba88cffd5d160533b464e/latest';
+const JSONBIN_SEED_KEY = '$2a$10$/XnOdzY/EsJ.CZL30.NpRuoPnAIeCcr73WnbP8MqY9ZIjkOJIVtNO';
+
+const K_STATE = 'fyp-tracker-state';      // full working copy on this device
+const K_BASE  = 'fyp-tracker-base';       // the cloud version this device last synced with
+const K_SHA   = 'fyp-tracker-base-sha';
+const K_SEEN  = 'fyp-tracker-seen-shas';
+const K_BASEV = 'fyp-tracker-base-v';     // version counter of that cloud copy (only ever goes up)  // older cloud versions this device has already moved past
+const K_DIRTY = 'fyp-tracker-dirty';      // '1' = this device has changes the cloud has not confirmed
+const K_TOKEN = 'fyp-gh-token';
+const K_BACKUPS = 'fyp-tracker-backups';
+const K_V2 = 'fyp-tracker-v2';
+
+const DEVICE_KEYS = ['badgePos', 'datesPos', 'datesCollapsed', 'theme'];  // per-device layout, never synced
+const SAVE_DEBOUNCE_MS = 2500;   // upload after a short pause in editing
+const SAVE_MAX_WAIT_MS = 15000;  // ...but never wait longer than this while someone keeps typing
+const POLL_MS = 60000;           // pick up other devices' changes once a minute while the tab is open
+const MAX_DOC_CHARS = 900000;    // GitHub contents API reads files up to 1 MB
+
+let base = null, baseSha = null, baseV = 0, seenShas = [];
+let syncing = false, syncAgain = false, saveTimer = null, firstPendingAt = 0, retryTimer = null;
+let lastSyncAt = 0, deferBound = false, localWriteFailed = false;
+
+/* ---------- small helpers ---------- */
+function lsGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+function lsSet(k, v) { try { localStorage.setItem(k, v); return true; } catch (e) { return false; } }
+function lsDel(k) { try { localStorage.removeItem(k); } catch (e) {} }
+function lsJSON(k) { try { const r = lsGet(k); return r ? JSON.parse(r) : null; } catch (e) { return null; } }
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+function clone(v) { return v === undefined ? undefined : JSON.parse(JSON.stringify(v)); }
+function canon(v) {   // key-order-independent fingerprint
+  if (v === undefined) return '~undefined';
+  return JSON.stringify(v, function (k, val) {
+    if (val && typeof val === 'object' && !Array.isArray(val)) {
+      const o = {}; Object.keys(val).sort().forEach(x => { o[x] = val[x]; }); return o;
     }
+    return val;
+  });
+}
+function eq(a, b) { return canon(a) === canon(b); }
+function isDirty() { return lsGet(K_DIRTY) === '1'; }
+function newId() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
+function isObjArray(a) { return Array.isArray(a) && a.every(o => o && typeof o === 'object' && !Array.isArray(o)); }
+function validDoc(d) { return !!d && typeof d === 'object' && Array.isArray(d.phase1) && Array.isArray(d.phase2); }
+function b64enc(str) {
+  const bytes = new TextEncoder().encode(str); let bin = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  return btoa(bin);
+}
+function b64dec(b64) {
+  const bin = atob(String(b64).replace(/\s/g, '')); const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new TextDecoder().decode(bytes);
+}
+function deviceLabel() {
+  const ua = navigator.userAgent || '';
+  if (/iPhone|Android.*Mobile/i.test(ua)) return 'phone';
+  if (/iPad|Android/i.test(ua)) return 'tablet';
+  return 'computer';
+}
+
+/* ---------- stable item ids (needed to merge lists item by item) ---------- */
+function ensureIds(s) {
+  Object.keys(s).forEach(key => {
+    const arr = s[key];
+    if (!Array.isArray(arr) || !arr.length || !isObjArray(arr)) return;
+    const legacy = !arr.some(o => o._id);   // first time: derive ids so every device gets the same ones
+    const seen = new Set();
+    arr.forEach((o, i) => {
+      if (!o._id || seen.has(o._id)) {
+        let id = legacy ? (o.id != null ? key + ':id' + o.id : key + ':' + i) : newId();
+        if (seen.has(id)) id = newId();
+        o._id = id;
+      }
+      seen.add(o._id);
+    });
+  });
+}
+
+function cloudDoc(s) {
+  const d = {};
+  Object.keys(s).forEach(k => { if (DEVICE_KEYS.indexOf(k) >= 0 || k.charAt(0) === '_') return; d[k] = clone(s[k]); });
+  return d;
+}
+
+/* ---------- three-way merge: base (last common version), local, remote ---------- */
+function mergeArr(b, l, r, noBase) {
+  const m = a => { const x = new Map(); a.forEach(o => x.set(o._id, o)); return x; };
+  const B = m(b), L = m(l), R = m(r);
+  const pick = id => {
+    const bo = B.get(id), lo = L.get(id), ro = R.get(id);
+    if (!bo) { if (lo && ro) return noBase ? ro : lo; return lo || ro; }  // added on one side
+    if (!lo && !ro) return null;                                         // deleted on both
+    if (!lo) return eq(ro, bo) ? null : ro;                              // deleted here; kept if the other device edited it
+    if (!ro) return eq(lo, bo) ? null : lo;                              // deleted there; kept if edited here
+    return eq(lo, bo) ? ro : lo;                                         // edited on one side (both: this device wins)
+  };
+  const order = (a, inSet) => a.map(o => o._id).filter(id => B.has(id) && inSet.has(id));
+  const localReordered = !noBase && !eq(order(l, B), order(b, L));
+  const primary = localReordered ? l : r, secondary = localReordered ? r : l;
+  const ids = [], seen = new Set();
+  primary.forEach(o => { if (!seen.has(o._id)) { seen.add(o._id); ids.push(o._id); } });
+  secondary.forEach((o, i) => {
+    if (seen.has(o._id)) return;
+    seen.add(o._id);
+    const prev = i > 0 ? secondary[i - 1]._id : null;
+    ids.splice(prev ? ids.indexOf(prev) + 1 : 0, 0, o._id);   // keep it next to its old neighbour
+  });
+  return ids.map(pick).filter(Boolean).map(clone);
+}
+
+function merge3(B, L, R) {
+  const noBase = !B; B = B || {};
+  const out = {};
+  const keys = new Set(Object.keys(L).concat(Object.keys(R)));
+  keys.forEach(k => {
+    const b = B[k], l = L[k], r = R[k];
+    if (!noBase && eq(l, b)) { if (r !== undefined) out[k] = clone(r); return; }   // only the cloud changed it
+    if (!noBase && eq(r, b)) { if (l !== undefined) out[k] = clone(l); return; }   // only this device changed it
+    if (isObjArray(l) && isObjArray(r)) { out[k] = mergeArr(isObjArray(b) ? b : [], l, r, noBase); return; }
+    const pickLocal = noBase ? r === undefined : l !== undefined;                    // single value changed on both
+    out[k] = clone(pickLocal ? l : r);
+  });
+  return out;
+}
+
+/* ---------- local storage ---------- */
+function writeLocal() {
+  const ok = lsSet(K_STATE, JSON.stringify(state));
+  if (!ok && !localWriteFailed) { localWriteFailed = true; setStatus('localfail'); }
+  if (ok) localWriteFailed = false;
+  return ok;
+}
+function pushLocalBackup(data, reason) {
+  const list = lsJSON(K_BACKUPS) || [];
+  list.unshift({ savedAt: new Date().toISOString(), reason: reason, data: data });
+  if (!lsSet(K_BACKUPS, JSON.stringify(list.slice(0, 3)))) lsDel(K_BACKUPS);   // backups must never block real saves
+}
+function setBase(doc, sha, v) {
+  if (baseSha && baseSha !== sha && seenShas.indexOf(baseSha) < 0) { seenShas.push(baseSha); seenShas = seenShas.slice(-30); }
+  base = clone(doc); baseSha = sha; baseV = v || 0;
+  lsSet(K_BASE, JSON.stringify(base)); lsSet(K_SHA, sha); lsSet(K_BASEV, String(baseV)); lsSet(K_SEEN, JSON.stringify(seenShas));
+}
+function applyDoc(doc) {
+  const dev = {};
+  DEVICE_KEYS.forEach(k => { if (state && state[k] !== undefined) dev[k] = state[k]; });
+  state = Object.assign(clone(doc), dev);
+  migrateState(); ensureIds(state);
+  writeLocal();
+}
+function rerender() {
+  try { render(); } catch (e) { console.error(e); }
+  try { renderDatesPanel(); } catch (e) {}
+}
+
+/* ---------- GitHub API ---------- */
+class SyncError extends Error { constructor(kind, msg) { super(msg); this.kind = kind; } }
+function ghHeaders(token) {
+  return { 'Authorization': 'Bearer ' + (token || lsGet(K_TOKEN)), 'Accept': 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' };
+}
+async function ghFetch(url, opts) {
+  try { return await fetch(url, Object.assign({ cache: 'no-store' }, opts)); }
+  catch (e) { throw new SyncError('offline', 'Network unreachable'); }
+}
+function ghFail(res) {
+  if (res.status === 401) return new SyncError('auth', 'GitHub rejected the token (HTTP 401)');
+  if (res.status === 404) return new SyncError('notfound', 'Repo not found or token has no access (HTTP 404)');
+  if (res.status === 429 || (res.status === 403 && res.headers.get('x-ratelimit-remaining') === '0')) return new SyncError('rate', 'GitHub rate limit (HTTP ' + res.status + ')');
+  if (res.status === 403) return new SyncError('forbidden', 'Token lacks Contents: Read and write (HTTP 403)');
+  return new SyncError('http', 'GitHub error (HTTP ' + res.status + ')');
+}
+async function ghGet() {
+  const res = await ghFetch(GH_CONTENTS, { headers: ghHeaders() });
+  if (res.status === 404) {
+    const repo = await ghFetch(GH_REPO_API, { headers: ghHeaders() });
+    if (repo.ok) return { missing: true };   // repo is fine, data file not created yet
+    throw ghFail(repo);
   }
+  if (!res.ok) throw ghFail(res);
+  const j = await res.json();
+  let doc;
+  try { doc = JSON.parse(b64dec(j.content)); } catch (e) { throw new SyncError('corrupt', 'Cloud file is not valid JSON'); }
+  if (!validDoc(doc)) throw new SyncError('corrupt', 'Cloud file does not look like tracker data');
+  const v = Number(doc._v) || 0; delete doc._v;
+  return { sha: j.sha, doc: doc, v: v };
+}
+async function ghPut(doc, sha, v) {
+  const text = JSON.stringify(Object.assign({ _v: v }, doc), null, 1);
+  if (text.length > MAX_DOC_CHARS) throw new SyncError('size', 'Tracker data is over 900 KB');
+  const body = { message: 'Tracker save (' + deviceLabel() + ') ' + new Date().toISOString(), content: b64enc(text) };
+  if (sha) body.sha = sha;
+  const res = await ghFetch(GH_CONTENTS, {
+    method: 'PUT', headers: Object.assign({ 'Content-Type': 'application/json' }, ghHeaders()), body: JSON.stringify(body)
+  });
+  if (res.status === 409 || res.status === 422) return { conflict: true };   // cloud changed since we read it
+  if (!res.ok) throw ghFail(res);
+  const j = await res.json();
+  return { sha: j.content.sha };
+}
+async function readJsonBinSeed() {
+  try {
+    const res = await fetch(JSONBIN_SEED_URL, { headers: { 'X-Access-Key': JSONBIN_SEED_KEY }, cache: 'no-store' });
+    if (!res.ok) return null;
+    const rec = (await res.json()).record;
+    return validDoc(rec) ? rec : null;
+  } catch (e) { return null; }
+}
+
+/* ---------- the one sync routine (serialised: never two at once) ---------- */
+function isEditingNow() {
+  if (document.visibilityState === 'hidden') return false;
+  const a = document.activeElement;
+  if (!a || a === document.body) return false;
+  if (a.closest && a.closest('#syncBanner')) return false;
+  if (a.isContentEditable || a.tagName === 'TEXTAREA' || a.tagName === 'SELECT') return true;
+  return a.tagName === 'INPUT' && ['checkbox', 'radio', 'button', 'submit', 'color', 'range', 'file'].indexOf((a.type || '').toLowerCase()) < 0;
+}
+function deferUntilBlur() {
+  if (deferBound) return;
+  deferBound = true;
+  document.addEventListener('focusout', function h() {
+    document.removeEventListener('focusout', h);
+    deferBound = false;
+    setTimeout(syncNow, 400);
+  });
+}
+
+async function syncNow() {
+  clearTimeout(saveTimer); saveTimer = null; firstPendingAt = 0;
+  if (!lsGet(K_TOKEN)) { setStatus('setup'); return; }
+  if (syncing) { syncAgain = true; return; }
+  syncing = true; clearTimeout(retryTimer);
+  setStatus(isDirty() ? 'saving' : 'checking');
+  let failed = null;
+  try {
+    for (let attempt = 0; ; attempt++) {
+      if (attempt >= 5) throw new SyncError('busy', 'The cloud copy kept changing');
+      if (attempt) await sleep(1000 * attempt);
+      let remote = await ghGet();
+      if (!remote.missing && remote.sha !== baseSha && (seenShas.indexOf(remote.sha) >= 0 || remote.v < baseV)) continue;   // GitHub served an older cached copy: ask again
+      const remoteChanged = !remote.missing && remote.sha !== baseSha;
+      if (remoteChanged && isEditingNow()) { deferUntilBlur(); setStatus(isDirty() ? 'pending' : 'synced'); return; }
+
+      if (remote.missing && !isDirty()) {           // very first save ever: bring the old JSONBin data across
+        const seed = await readJsonBinSeed();
+        if (seed && !isDirty()) { pushLocalBackup(cloudDoc(state), 'before seeding from JSONBin'); applyDoc(seed); rerender(); }
+        remote = { missing: true };
+      }
+
+      // ---- synchronous from here to the PUT: user edits cannot slip in between reading and merging ----
+      ensureIds(state);
+      const localDoc = cloudDoc(state);
+      let target;
+      if (remote.missing || !remoteChanged) target = localDoc;
+      else if (isDirty()) target = merge3(base, localDoc, remote.doc);
+      else target = remote.doc;
+      if (!eq(target, localDoc)) {
+        if (isDirty()) pushLocalBackup(localDoc, 'this device before merging cloud changes');
+        applyDoc(target); rerender();
+      }
+      const toSend = cloudDoc(state);
+      const sentCanon = canon(toSend);
+
+      if (!remote.missing && eq(toSend, remote.doc)) {   // cloud already has everything
+        setBase(remote.doc, remote.sha, remote.v);
+      } else {
+        const newV = remote.missing ? Math.max(1, baseV + 1) : remote.v + 1;
+        const res = await ghPut(toSend, remote.missing ? null : remote.sha, newV);
+        if (res.conflict) continue;                       // someone saved in between: re-read and merge again
+        setBase(toSend, res.sha, newV);
+      }
+      if (canon(cloudDoc(state)) === sentCanon) lsDel(K_DIRTY);   // edits made during the upload stay dirty
+      lastSyncAt = Date.now();
+      break;
+    }
+  } catch (e) {
+    failed = e instanceof SyncError ? e : new SyncError('http', String(e && e.message || e));
+    console.error('Cloud sync failed (data is safe on this device):', failed);
+  } finally {
+    syncing = false;
+  }
+  if (failed) {
+    setStatus(failed.kind, failed.message);
+    if (failed.kind === 'auth' || failed.kind === 'notfound' || failed.kind === 'forbidden') showTokenSetup('Cloud sync stopped: ' + failed.message + '. Paste a valid token to continue (your data is safe on this device).');
+    else if (failed.kind !== 'corrupt' && failed.kind !== 'size') retryTimer = setTimeout(syncNow, failed.kind === 'rate' ? 300000 : 30000);
+    return;
+  }
+  setStatus(isDirty() ? 'pending' : 'synced');
+  if (syncAgain || isDirty()) { syncAgain = false; scheduleSync(); }
+}
+
+function scheduleSync() {
+  if (!firstPendingAt) firstPendingAt = Date.now();
+  clearTimeout(saveTimer);
+  const wait = Math.max(0, Math.min(SAVE_DEBOUNCE_MS, firstPendingAt + SAVE_MAX_WAIT_MS - Date.now()));
+  saveTimer = setTimeout(syncNow, wait);
+}
+
+/* Called by the rest of the app after every change. */
+function save() {
+  writeLocal();
+  lsSet(K_DIRTY, '1');
+  if (!lsGet(K_TOKEN)) { setStatus('setup'); return; }
+  setStatus('pending');
+  scheduleSync();
+}
+
+/* ---------- status pill + token setup ---------- */
+function ensureStatusPill() {
+  let el = document.getElementById('syncStatus');
+  if (el) return el;
+  el = document.createElement('div');
+  el.id = 'syncStatus'; el.className = 'sync-status';
+  el.innerHTML = '<span class="dot"></span><span class="txt"></span><a class="hist" target="_blank" rel="noopener" title="Every saved version">history</a>';
+  el.querySelector('.hist').href = GH_HISTORY;
+  el.querySelector('.hist').addEventListener('click', ev => ev.stopPropagation());
+  el.addEventListener('click', () => {
+    if (!lsGet(K_TOKEN) || ['auth', 'notfound', 'forbidden'].indexOf(el.dataset.kind) >= 0) showTokenSetup();
+    else syncNow();
+  });
+  document.body.appendChild(el);
+  return el;
+}
+function setStatus(kind, detail) {
+  const el = ensureStatusPill();
+  const t = new Date(lastSyncAt || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const map = {
+    setup:     ['warn', 'Cloud not connected - tap to connect'],
+    checking:  ['busy', 'Checking cloud...'],
+    saving:    ['busy', 'Saving...'],
+    pending:   ['busy', 'Unsaved - uploading shortly'],
+    synced:    ['ok',   'Saved to cloud ' + t],
+    offline:   ['warn', 'Offline - saved on this device, uploads automatically'],
+    rate:      ['warn', 'GitHub busy - saved on this device, retrying in 5 min'],
+    busy:      ['warn', 'Retrying shortly - saved on this device'],
+    http:      ['err',  'Cloud save failed - saved on this device, retrying'],
+    auth:      ['err',  'Token rejected - tap to fix'],
+    notfound:  ['err',  'Repo not found - tap to fix'],
+    forbidden: ['err',  'Token cannot write - tap to fix'],
+    corrupt:   ['err',  'Cloud file damaged - restore it from history'],
+    size:      ['err',  'Data too large to upload'],
+    localfail: ['err',  'This browser refused to store data!'],
+  };
+  const v = map[kind] || map.http;
+  el.dataset.kind = kind; el.dataset.level = v[0];
+  el.querySelector('.txt').textContent = v[1];
+  el.title = detail || v[1];
+}
+function showTokenSetup(msg) {
+  const el = document.getElementById('syncBanner');
+  if (!el) return;
+  el.style.display = 'flex';
+  el.innerHTML = '<span id="ghTokenMsg"></span>'
+    + '<input id="ghTokenInput" type="password" autocomplete="off" placeholder="github_pat_..." style="flex:1;min-width:160px;background:#fff;color:#111;border:0;border-radius:8px;padding:7px 10px;font-size:13px;">'
+    + '<button type="button" id="ghTokenSave">Connect</button><button type="button" id="ghTokenLater">Later</button>';
+  document.getElementById('ghTokenMsg').textContent = msg || 'Connect cloud sync: paste your GitHub token (stored only on this device).';
+  document.getElementById('ghTokenLater').onclick = () => { el.style.display = 'none'; el.innerHTML = ''; };
+  document.getElementById('ghTokenSave').onclick = async () => {
+    const tok = document.getElementById('ghTokenInput').value.trim();
+    if (!tok) return;
+    const msgEl = document.getElementById('ghTokenMsg');
+    msgEl.textContent = 'Checking token...';
+    try {
+      const res = await ghFetch(GH_REPO_API, { headers: ghHeaders(tok) });
+      if (!res.ok) throw ghFail(res);
+      const repo = await res.json();
+      if (repo.permissions && repo.permissions.push === false) throw new SyncError('forbidden', 'Token can read but not write');
+      lsSet(K_TOKEN, tok);
+      el.style.display = 'none'; el.innerHTML = '';
+      syncNow();
+    } catch (e) {
+      msgEl.textContent = 'Not connected: ' + (e.message || e) + '. Check the token has access to ' + GH_OWNER + '/' + GH_REPO + ' with Contents: Read and write.';
+    }
+  };
+}
+
+function migrateState() {
   if (!state.ganttStart) {
     state.ganttStart = new Date().toISOString().slice(0,10);
   }
@@ -497,6 +891,22 @@ async function load() {
     status: item.status || 'Open'
   });
   if (!Array.isArray(state.issueLog)) { state.issueLog = []; }
+  delete state._rev;
+}
+
+/* ---------- startup ---------- */
+async function load() {
+  const local = lsJSON(K_STATE);
+  state = validDoc(local) ? local : defaultState();
+  delete state._rev;
+  if (lsGet(K_V2) !== '1') {            // first run of this version on this device: old sync flags mean nothing now
+    lsDel(K_DIRTY); lsDel('fyp-tracker-nover');
+    lsSet(K_V2, '1');
+  }
+  migrateState(); ensureIds(state);
+  base = lsJSON(K_BASE); baseSha = lsGet(K_SHA); baseV = Number(lsGet(K_BASEV)) || 0; seenShas = lsJSON(K_SEEN) || [];
+  if (!validDoc(base)) { base = null; baseSha = null; baseV = 0; }
+  writeLocal();
   render();
   setupDraggable('floatBadge', 'badgePos');
   setupDraggable('floatDates', 'datesPos');
@@ -505,34 +915,34 @@ async function load() {
   setupThemeToggle();
   setupTabWheelScroll();
   setupTableModal();
-  save();
+  ensureStatusPill();
+  if (!lsGet(K_TOKEN)) { setStatus('setup'); showTokenSetup(); }
+  else syncNow();
 }
 
-let saveInFlight = null;
-let saveQueued = false;
-
-async function save() {
-  try { localStorage.setItem('fyp-tracker-state', JSON.stringify(state)); } catch (e) {}
-
-  if (saveInFlight) { saveQueued = true; return; }
-  saveInFlight = doSave();
-  await saveInFlight;
-  saveInFlight = null;
-  if (saveQueued) { saveQueued = false; save(); }
-}
-
-async function doSave() {
-  try {
-    const res = await fetch(JSONBIN_URL, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json', 'X-Access-Key': JSONBIN_KEY },
-      body: JSON.stringify(state)
-    });
-    if (!res.ok) throw new Error('JSONBin write failed: ' + res.status);
-  } catch (e) {
-    console.error('JSONBin save failed (saved locally only):', e);
+document.addEventListener('visibilitychange', function () {
+  if (!lsGet(K_TOKEN)) return;
+  if (document.visibilityState === 'hidden') { if (saveTimer || isDirty()) syncNow(); return; }
+  if (Date.now() - lastSyncAt > 20000) syncNow();
+});
+window.addEventListener('pagehide', function () { if (lsGet(K_TOKEN) && (saveTimer || isDirty())) syncNow(); });
+window.addEventListener('online', function () { if (lsGet(K_TOKEN)) syncNow(); });
+window.addEventListener('storage', function (e) {     // another tab on this same device saved
+  if (e.key === K_STATE && e.newValue && !isEditingNow()) {
+    try {
+      const s = JSON.parse(e.newValue);
+      if (validDoc(s)) {
+        state = s; migrateState();
+        const b = lsJSON(K_BASE); base = validDoc(b) ? b : base;
+        baseSha = lsGet(K_SHA) || baseSha; baseV = Number(lsGet(K_BASEV)) || baseV; seenShas = lsJSON(K_SEEN) || seenShas;
+        rerender();
+      }
+    } catch (err) {}
   }
-}
+});
+setInterval(function () {
+  if (document.visibilityState === 'visible' && lsGet(K_TOKEN) && !syncing && !saveTimer && Date.now() - lastSyncAt > POLL_MS - 5000) syncNow();
+}, POLL_MS);
 
 function pct(list) {
   if (!list.length) return 0;
